@@ -80,22 +80,27 @@ Scroll to **Comparison**, tick the models you want.
 
 ### 4. Mark what you have judged
 
-Three buttons sit next to every model name:
+Each model name carries one picker; whichever mark you choose is the one it shows:
 
-| | Meaning | Limit |
+| Option | Meaning | Limit |
 |---|---|---|
-| `☆` | the **best** model for this dataset | **one per input dataset** — starring another clears the previous star |
-| `👍` | useful, worth keeping | any number |
-| `👎` | not useful, already ruled out | any number |
+| `— unmarked` | not looked at yet | — |
+| `★ best` | the **best** model for this dataset | **one per input dataset** — starring another clears the previous star |
+| `👍 good` | result looks right | any number |
+| `👎 poor` | result is off, no need to revisit | any number |
 
-The three are one rating, so a model carries at most one mark: starring a model you had thumbed up
-replaces the thumb, and clicking the current mark again clears it. Marks are synced everywhere —
-card tint, dataset header (`★ best …` plus `👍 3` `👎 2` counts), both comparison layouts and the
-comparison filter chips — and are saved with the project.
+A mark belongs to **one model** and a model carries at most one, so marking a model you had thumbed
+up as best replaces the thumb. Marks are synced everywhere — card tint, both comparison layouts and
+the comparison filter chips. They are saved with the project. (The dataset header shows only
+`★ best <model>`; it does not count how many are good or poor.)
 
-The comparison filter gains a **Mark** row (`★ best` / `👍 useful` / `👎 not useful` / `unmarked`),
-each toggled on its own, so "only the starred and useful ones" or "hide the rejects" is one click.
-The row is hidden while everything in the case carries the same mark.
+The comparison filter gains a **Mark** row (`★ best` / `👍 good` / `👎 poor` / `unmarked`), each
+toggled on its own — which is what the marks are for: judge once, then filter the poor ones out of
+the comparison in a click. The row is hidden while everything in the case carries the same mark.
+
+> A picker rather than a button that cycles on each click: the star is exclusive per dataset, so
+> cycling `👎` back to unmarked would have to pass through `★` and would silently steal another
+> model's star.
 
 ### 5. Keep your results (recommended)
 

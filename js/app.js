@@ -698,19 +698,19 @@
     return i < 0 ? null : GROUP_TINTS[i % GROUP_TINTS.length];
   }
 
-  /* ---- Marks: star = best, thumbs-up = useful, thumbs-down = not useful ----
-     The three are one rating dimension, so a model carries at most one mark
-     (m.mark). The star has one extra constraint: at most one per input data, so
-     starring another model clears the previous star -- but never touches anyone
-     else's thumbs. */
+  /* ---- Marks: star = best, thumbs-up = good, thumbs-down = poor ----
+     A mark belongs to one model, and the three are one rating dimension, so a
+     model carries at most one (m.mark). The star has one extra constraint: at
+     most one per input data, so starring another model clears the previous star
+     -- but never touches anyone else's thumbs. */
   var MARKS = [
-    { key: "star", glyph: "★", off: "☆", titleKey: "mark.star" },
-    { key: "up",   glyph: "👍", off: "👍", titleKey: "mark.up" },
-    { key: "down", glyph: "👎", off: "👎", titleKey: "mark.down" }
+    { key: "star", labelKey: "mark.opt.star" },
+    { key: "up",   labelKey: "mark.opt.up" },
+    { key: "down", labelKey: "mark.opt.down" }
   ];
 
   function setMark(c, model, mark) {
-    if (model.mark === mark) { delete model.mark; save(); render(); return; }
+    if (!mark) { delete model.mark; save(); render(); return; }
     if (mark === "star") {
       c.models.forEach(function (m) {
         if (m !== model && m.inputId === model.inputId && m.mark === "star") delete m.mark;
@@ -720,16 +720,23 @@
     save(); render();
   }
 
-  function markButtons(c, m) {
-    return el("div", { class: "mark-group" }, MARKS.map(function (def) {
-      var on = m.mark === def.key;
-      return el("button", {
-        class: "star-btn " + def.key + (on ? " on" : ""),
-        title: on ? t("mark.clear") : t(def.titleKey),
-        text: on ? def.glyph : def.off,
-        onclick: function (e) { e.stopPropagation(); setMark(c, m, def.key); }
-      });
-    }));
+  /* One picker per model, showing whichever mark is set.
+     Deliberately not a button that cycles on each click: the star is exclusive
+     per input data, so cycling 👎 back to unmarked would have to pass through ★
+     and would silently steal another model's star. */
+  function markSelect(c, m) {
+    var sel = el("select", {
+      class: "mark-select" + markClass(m),
+      title: t("mark.pick"),
+      onchange: function () { setMark(c, m, sel.value); },
+      onclick: function (e) { e.stopPropagation(); }
+    });
+    sel.appendChild(el("option", { value: "", text: t("mark.opt.none") }));
+    MARKS.forEach(function (def) {
+      sel.appendChild(el("option", { value: def.key, text: t(def.labelKey) }));
+    });
+    sel.value = m.mark || "";
+    return sel;
   }
 
   /** Class suffix that tints a model card / comparison title by its mark */
@@ -755,16 +762,6 @@
     })[0] || null;
   }
 
-  /** How many models under this input data are thumbed up / down */
-  function markCounts(c, inp) {
-    var up = 0, down = 0;
-    c.models.forEach(function (m) {
-      if (m.inputId !== inp.id) return;
-      if (m.mark === "up") up++;
-      else if (m.mark === "down") down++;
-    });
-    return { up: up, down: down };
-  }
 
   /** Short label for an input data: drop the prefix it shares with the case name */
   function inputShort(inp) {
@@ -860,10 +857,6 @@
         chips.unshift(el("span", { class: "chip star", title: best.folderName },
           ["★ " + t("star.badge") + " ", el("b", { text: displayName(best) })]));
       }
-      // How many models here are thumbed up / down; a zero side is left out
-      var mc = markCounts(c, inp);
-      if (mc.up) chips.push(el("span", { class: "chip mark-up", text: "👍 " + mc.up }));
-      if (mc.down) chips.push(el("span", { class: "chip mark-down", text: "👎 " + mc.down }));
       head.appendChild(el("div", { class: "chip-row", style: "margin-top:7px" }, chips));
     } else {
       head.appendChild(el("div", { class: "data-group-title" }, [
@@ -897,7 +890,7 @@
         text: m.imagesCollapsed ? "▸" : "▾",
         onclick: function () { m.imagesCollapsed = !m.imagesCollapsed; save(); render(); }
       }),
-      markButtons(c, m),
+      markSelect(c, m),
       el("div", { class: "model-title mono", text: m.folderName }),
       el("div", { class: "model-actions" }, [
         inputSelect(c, m),
@@ -1470,7 +1463,7 @@
             : [el("div", { class: "cmp-missing", text: t("empty.noThisImage") })];
           grid.appendChild(el("div", { class: "cmp-cell" },
             [el("div", { class: "cmp-cell-title" }, [
-              markButtons(c, cell.model), displayName(cell.model)
+              markSelect(c, cell.model), displayName(cell.model)
             ])].concat(body)));
         });
         area.appendChild(el("div", { class: "cmp-group" }, [
@@ -1498,7 +1491,7 @@
         });
         area.appendChild(el("div", { class: "cmp-group" }, [
           el("div", { class: "cmp-group-title" }, [
-            markButtons(c, m), el("span", { class: "mono", text: m.folderName })
+            markSelect(c, m), el("span", { class: "mono", text: m.folderName })
           ]), grid
         ]));
       });

@@ -163,18 +163,7 @@ html, body {
 }
 .caret-btn:hover { background: var(--accent-wash); color: var(--accent-ink); }
 
-/* ---------------- Marks (best / useful / not useful) ---------------- */
-.star-btn {
-  font: inherit; font-size: 14px; line-height: 1;
-  width: 22px; height: 22px; flex: none;
-  display: grid; place-items: center;
-  background: transparent; color: var(--ink-3);
-  border: 1px solid transparent; border-radius: 6px;
-  cursor: pointer; margin-top: -1px;
-  transition: color .13s, background .13s;
-}
-.star-btn:hover { color: var(--star); background: var(--star-wash); }
-.star-btn.on { color: var(--star); }
+/* ---------------- Marks (★ best / 👍 good / 👎 poor) ---------------- */
 .model-card.starred {
   border-color: var(--star-edge);
   background: var(--star-wash);
@@ -182,20 +171,22 @@ html, body {
 .chip.star { background: var(--star-wash); color: var(--star-ink); }
 .chip.star b { color: var(--star-ink); }
 
-/* The three mark buttons sit in one group */
-.mark-group { display: flex; gap: 1px; flex: none; }
-/* Emoji glyphs are wider than a star and get clipped in a 22px box */
-.star-btn.up, .star-btn.down { width: 25px; font-size: 11.5px; }
-.star-btn.up:hover { color: var(--up); background: var(--up-wash); }
-.star-btn.up.on { color: var(--up); }
-.star-btn.down:hover { color: var(--down); background: var(--down-wash); }
-.star-btn.down.on { color: var(--down); }
+/* Mark picker: shows whichever mark is set, instead of three buttons */
+.mark-select {
+  font: inherit; font-size: 12px; line-height: 1;
+  flex: none; width: 92px;
+  padding: 3px 4px; margin-top: -1px;
+  background: var(--inset-2); color: var(--ink-2);
+  border: 1px solid transparent; border-radius: 6px;
+  cursor: pointer;
+  transition: color .13s, background .13s, border-color .13s;
+}
+.mark-select:hover { border-color: var(--line); }
+.mark-select.starred   { color: var(--star-ink); background: var(--star-wash); }
+.mark-select.mark-up   { color: var(--up-ink);   background: var(--up-wash); }
+.mark-select.mark-down { color: var(--down-ink); background: var(--down-wash); }
 .model-card.mark-up { border-color: var(--up-edge); background: var(--up-wash); }
 .model-card.mark-down { border-color: var(--down-edge); background: var(--down-wash); }
-.chip.mark-up { background: var(--up-wash); color: var(--up-ink); }
-.chip.mark-up b { color: var(--up-ink); }
-.chip.mark-down { background: var(--down-wash); color: var(--down-ink); }
-.chip.mark-down b { color: var(--down-ink); }
 .chip-select.mark-up { background: var(--up-wash); color: var(--up-ink); }
 .chip-select.mark-down { background: var(--down-wash); color: var(--down-ink); }
 
