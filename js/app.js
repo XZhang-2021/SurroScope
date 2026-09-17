@@ -400,7 +400,7 @@
     var groups = groupIntoModelFolders(entries);
     if (!groups.length) return;
 
-    var stats = { folders: 0, images: 0, files: 0, last: null, lastInput: null,
+    var stats = { folders: 0, images: 0, files: 0, skipped: 0, last: null, lastInput: null,
                   failures: [], noImage: [] };
     banner(t("msg.reading"), false);
 
@@ -426,7 +426,7 @@
           msg += t("msg.hintLongPath", { len: f0.pathLen });
         }
         banner(msg, true);
-      } else if (!stats.images && stats.noImage.length) {
+      } else if (!stats.images && !stats.skipped && stats.noImage.length) {
         // Not a single image made it: say whether the format is unsupported, or there
         // simply were no images
         var d = stats.noImage[0];
@@ -435,18 +435,26 @@
         banner(t(d.unviewable.length ? "msg.noImgUnviewable" : "msg.noImgFound",
           { name: d.folder, list: list }), true);
         console.warn("[fml] no images recognised, folder contents:", d.folder, d.names);
-      } else if (groups.length > 1) {
-        banner(stats.images
-          ? t("msg.batchImported", { folders: stats.folders, images: stats.images })
-          : t("msg.batchNoImg", { folders: stats.folders }), false);
-      } else if (deriveInput) {
-        banner(stats.images
-          ? t("msg.resultImported", { name: stats.last, input: stats.lastInput, n: stats.images })
-          : t("msg.resultNoImg", { name: stats.last, input: stats.lastInput }), false);
+      } else if (!stats.images && stats.skipped) {
+        // Every image is there, just untouched -- do not call that "no images found"
+        banner(groups.length > 1
+          ? t("msg.allSkippedBatch", { folders: stats.folders, n: stats.skipped })
+          : t("msg.allSkipped", { name: stats.last, n: stats.skipped }), false);
       } else {
-        banner(stats.images
-          ? t("msg.imported", { name: stats.last, n: stats.images, rest: stats.files - stats.images })
-          : t("msg.importedNoImg", { name: stats.last, n: stats.files }), false);
+        var skip = stats.skipped ? t("msg.skippedSuffix", { n: stats.skipped }) : "";
+        if (groups.length > 1) {
+          banner((stats.images
+            ? t("msg.batchImported", { folders: stats.folders, images: stats.images })
+            : t("msg.batchNoImg", { folders: stats.folders })) + skip, false);
+        } else if (deriveInput) {
+          banner((stats.images
+            ? t("msg.resultImported", { name: stats.last, input: stats.lastInput, n: stats.images })
+            : t("msg.resultNoImg", { name: stats.last, input: stats.lastInput })) + skip, false);
+        } else {
+          banner((stats.images
+            ? t("msg.imported", { name: stats.last, n: stats.images, rest: stats.files - stats.images })
+            : t("msg.importedNoImg", { name: stats.last, n: stats.files })) + skip, false);
+        }
       }
     }).catch(function (e) { banner(t("msg.importFail", { e: errText(e) }), true); });
   }
@@ -506,6 +514,14 @@
 
     return serialChain(images.map(function (en) {
       return function () {
+        // A file of this name is already stored: compare modification times only, and
+        // skip it if it has not changed rather than rewriting the same bytes
+        var prev = model.images.filter(function (im) { return im.name === en.file.name; })[0];
+        if (prev && prev.lastModified && en.file.lastModified &&
+            en.file.lastModified <= prev.lastModified) {
+          stats.skipped++;
+          return Promise.resolve();
+        }
         return storeImage(model, classify(en.file.name, folderName), en.file)
           .then(function () { stats.images++; })
           .catch(function (e) { noteFailure(stats, en.path, e); });
@@ -554,24 +570,30 @@
     var slotDef = SLOTS.filter(function (s) { return s.key === slotKey; })[0] || SLOTS[2];
     var entry = {
       id: uid(), slot: slotKey, name: file.name,
-      mime: file.type || guessMime(file.name), blobId: uid()
+      mime: file.type || guessMime(file.name), blobId: uid(),
+      lastModified: file.lastModified || null   // tells a re-import whether the file changed
     };
     var caseObj = caseOfModel(model);
     return saveImageBlob(caseObj, model, entry, file).then(function () {
-      if (!slotDef.multi) {
-        // Single-image slot: replace whatever is there.
-        // The trap: in folder mode the path is decided purely by
-        // <case>/<model>/<slot>.<ext>, with no reference to which image it is, so the
-        // file just written and the "old" one being replaced are very often the same
-        // file -- deleting the old entry then deletes the image just written. Re-dropping
-        // a retrained result folder is enough to trigger it.
-        // The overwrite already performed the replacement, so when the paths match we
-        // only drop the in-memory reference.
-        model.images.filter(function (im) { return im.slot === slotKey; }).forEach(function (im) {
-          if (!(im.path && entry.path && im.path === entry.path)) removeImageBlob(im);
-          releaseUrl(im.blobId);
-        });
-        model.images = model.images.filter(function (im) { return im.slot !== slotKey; });
+      // Single-image slot: displace whatever is in it.
+      // Multi-image slot ("other"): displace only the image of the same name --
+      // appending instead is what made repeated imports of one file pile up duplicates.
+      var drop = model.images.filter(function (im) {
+        return im.slot === slotKey && (!slotDef.multi || im.name === entry.name);
+      });
+      // The trap: in folder mode the path is decided purely by
+      // <case>/<model>/<slot>.<ext>, with no reference to which image it is, so the
+      // file just written and the "old" one being displaced are very often the same
+      // file -- deleting the old entry then deletes the image just written. Re-dropping
+      // a retrained result folder is enough to trigger it.
+      // The overwrite already performed the replacement, so when the paths match we
+      // only drop the in-memory reference.
+      drop.forEach(function (im) {
+        if (!(im.path && entry.path && im.path === entry.path)) removeImageBlob(im);
+        releaseUrl(im.blobId);
+      });
+      if (drop.length) {
+        model.images = model.images.filter(function (im) { return drop.indexOf(im) < 0; });
       }
       model.images.push(entry);
     });
@@ -676,30 +698,72 @@
     return i < 0 ? null : GROUP_TINTS[i % GROUP_TINTS.length];
   }
 
-  /* ---- Star: at most one "best" model per input data ---- */
-  function toggleStar(c, model) {
-    var was = !!model.starred;
-    c.models.forEach(function (m) {
-      if (m.inputId === model.inputId) delete m.starred;
-    });
-    if (!was) model.starred = true;
+  /* ---- Marks: star = best, thumbs-up = useful, thumbs-down = not useful ----
+     The three are one rating dimension, so a model carries at most one mark
+     (m.mark). The star has one extra constraint: at most one per input data, so
+     starring another model clears the previous star -- but never touches anyone
+     else's thumbs. */
+  var MARKS = [
+    { key: "star", glyph: "★", off: "☆", titleKey: "mark.star" },
+    { key: "up",   glyph: "👍", off: "👍", titleKey: "mark.up" },
+    { key: "down", glyph: "👎", off: "👎", titleKey: "mark.down" }
+  ];
+
+  function setMark(c, model, mark) {
+    if (model.mark === mark) { delete model.mark; save(); render(); return; }
+    if (mark === "star") {
+      c.models.forEach(function (m) {
+        if (m !== model && m.inputId === model.inputId && m.mark === "star") delete m.mark;
+      });
+    }
+    model.mark = mark;
     save(); render();
   }
 
-  function starButton(c, m) {
-    return el("button", {
-      class: "star-btn" + (m.starred ? " on" : ""),
-      title: m.starred ? t("star.remove") : t("star.set"),
-      text: m.starred ? "★" : "☆",
-      onclick: function (e) { e.stopPropagation(); toggleStar(c, m); }
-    });
+  function markButtons(c, m) {
+    return el("div", { class: "mark-group" }, MARKS.map(function (def) {
+      var on = m.mark === def.key;
+      return el("button", {
+        class: "star-btn " + def.key + (on ? " on" : ""),
+        title: on ? t("mark.clear") : t(def.titleKey),
+        text: on ? def.glyph : def.off,
+        onclick: function (e) { e.stopPropagation(); setMark(c, m, def.key); }
+      });
+    }));
+  }
+
+  /** Class suffix that tints a model card / comparison title by its mark */
+  function markClass(m) {
+    if (m.mark === "star") return " starred";
+    if (m.mark === "up") return " mark-up";
+    if (m.mark === "down") return " mark-down";
+    return "";
+  }
+
+  /** Glyph prefixed to a model name in lists and filter chips */
+  function markGlyph(m) {
+    if (m.mark === "star") return "★ ";
+    if (m.mark === "up") return "👍 ";
+    if (m.mark === "down") return "👎 ";
+    return "";
   }
 
   function starredOf(c, inp) {
     if (!inp) return null;
     return c.models.filter(function (m) {
-      return m.inputId === inp.id && m.starred;
+      return m.inputId === inp.id && m.mark === "star";
     })[0] || null;
+  }
+
+  /** How many models under this input data are thumbed up / down */
+  function markCounts(c, inp) {
+    var up = 0, down = 0;
+    c.models.forEach(function (m) {
+      if (m.inputId !== inp.id) return;
+      if (m.mark === "up") up++;
+      else if (m.mark === "down") down++;
+    });
+    return { up: up, down: down };
   }
 
   /** Short label for an input data: drop the prefix it shares with the case name */
@@ -796,6 +860,10 @@
         chips.unshift(el("span", { class: "chip star", title: best.folderName },
           ["★ " + t("star.badge") + " ", el("b", { text: displayName(best) })]));
       }
+      // How many models here are thumbed up / down; a zero side is left out
+      var mc = markCounts(c, inp);
+      if (mc.up) chips.push(el("span", { class: "chip mark-up", text: "👍 " + mc.up }));
+      if (mc.down) chips.push(el("span", { class: "chip mark-down", text: "👎 " + mc.down }));
       head.appendChild(el("div", { class: "chip-row", style: "margin-top:7px" }, chips));
     } else {
       head.appendChild(el("div", { class: "data-group-title" }, [
@@ -821,7 +889,7 @@
     var diffKeys = {};
     diffs.forEach(function (d) { diffKeys[d.key] = 1; });
 
-    var card = el("div", { class: "model-card" + (m.starred ? " starred" : "") });
+    var card = el("div", { class: "model-card" + markClass(m) });
 
     card.appendChild(el("div", { class: "model-card-head" }, [
       el("button", {
@@ -829,7 +897,7 @@
         text: m.imagesCollapsed ? "▸" : "▾",
         onclick: function () { m.imagesCollapsed = !m.imagesCollapsed; save(); render(); }
       }),
-      starButton(c, m),
+      markButtons(c, m),
       el("div", { class: "model-title mono", text: m.folderName }),
       el("div", { class: "model-actions" }, [
         inputSelect(c, m),
@@ -1081,7 +1149,33 @@
     return c._filters;
   }
 
+  /* ---- Mark filter: star / up / down / unmarked, each toggled on its own ---- */
+  var MARK_BUCKETS = [
+    { key: "star", labelKey: "mark.bucket.star" },
+    { key: "up",   labelKey: "mark.bucket.up" },
+    { key: "down", labelKey: "mark.bucket.down" },
+    { key: "none", labelKey: "mark.bucket.none" }
+  ];
+
+  function markBucketOf(m) { return m.mark || "none"; }
+
+  /** Only buckets that actually occur in this case; one bucket means nothing to filter */
+  function markBucketsPresent(c) {
+    return MARK_BUCKETS.filter(function (b) {
+      return c.models.some(function (m) { return markBucketOf(m) === b.key; });
+    });
+  }
+
+  function markFilterState(c) {
+    if (!c._marks) c._marks = {};
+    MARK_BUCKETS.forEach(function (b) {
+      if (c._marks[b.key] === undefined) c._marks[b.key] = true;
+    });
+    return c._marks;
+  }
+
   function modelPassesFilter(c, m) {
+    if (markFilterState(c)[markBucketOf(m)] === false) return false;
     var f = c._filters || {};
     var params = filterableParams(c);
     for (var i = 0; i < params.length; i++) {
@@ -1119,11 +1213,38 @@
     var params = filterableParams(c);
     var types = slotTypesPresent(c);
     var showTypes = types.length > 1;          // with only one type, filtering is pointless
-    if (!params.length && !showTypes) return;
+    var buckets = markBucketsPresent(c);
+    var showMarks = buckets.length > 1;        // likewise when nothing has been marked yet
+    if (!params.length && !showTypes && !showMarks) return;
     filterState(c);
     slotState(c);
+    markFilterState(c);
 
     wrap.appendChild(el("span", { class: "param-filter-head", text: t("cmp.paramFilter") }));
+
+    if (showMarks) {
+      var mitem = el("div", { class: "param-item" }, [
+        el("span", { class: "param-item-label", text: t("cmp.markFilter") })
+      ]);
+      var allMarks = buckets.every(function (b) { return c._marks[b.key]; });
+      mitem.appendChild(el("span", {
+        class: "chip toggle all" + (allMarks ? " on" : ""), text: t("cmp.all"),
+        onclick: function () {
+          buckets.forEach(function (b) { c._marks[b.key] = true; });
+          refreshCompare(c);
+        }
+      }));
+      buckets.forEach(function (b) {
+        mitem.appendChild(el("span", {
+          class: "chip toggle" + (c._marks[b.key] ? " on" : ""), text: t(b.labelKey),
+          onclick: function () {
+            c._marks[b.key] = !c._marks[b.key];
+            refreshCompare(c);
+          }
+        }));
+      });
+      wrap.appendChild(mitem);
+    }
 
     if (showTypes) {
       var titem = el("div", { class: "param-item" }, [
@@ -1176,8 +1297,8 @@
     wrap.appendChild(el("button", {
       class: "link-btn", text: t("cmp.reset"),
       onclick: function () {
-        c._filters = {}; c._slots = null;
-        filterState(c); slotState(c); refreshCompare(c);
+        c._filters = {}; c._slots = null; c._marks = null;
+        filterState(c); slotState(c); markFilterState(c); refreshCompare(c);
       }
     }));
   }
@@ -1233,8 +1354,9 @@
           onchange: function () { c._selected[m.id] = cb.checked; renderCompare(c); }
         });
         chips.appendChild(el("label", {
-          class: "chip chip-select" + (m.starred ? " star" : ""), title: m.folderName
-        }, [cb, (m.starred ? "★ " : "") + displayName(m)]));
+          class: "chip chip-select" + (m.mark === "star" ? " star" : markClass(m)),
+          title: m.folderName
+        }, [cb, markGlyph(m) + displayName(m)]));
       });
       block.appendChild(chips);
       wrap.appendChild(block);
@@ -1348,7 +1470,7 @@
             : [el("div", { class: "cmp-missing", text: t("empty.noThisImage") })];
           grid.appendChild(el("div", { class: "cmp-cell" },
             [el("div", { class: "cmp-cell-title" }, [
-              starButton(c, cell.model), displayName(cell.model)
+              markButtons(c, cell.model), displayName(cell.model)
             ])].concat(body)));
         });
         area.appendChild(el("div", { class: "cmp-group" }, [
@@ -1376,7 +1498,7 @@
         });
         area.appendChild(el("div", { class: "cmp-group" }, [
           el("div", { class: "cmp-group-title" }, [
-            starButton(c, m), el("span", { class: "mono", text: m.folderName })
+            markButtons(c, m), el("span", { class: "mono", text: m.folderName })
           ]), grid
         ]));
       });
@@ -1554,6 +1676,9 @@
         if (typeof m.folderName !== "string") m.folderName = String(m.folderName || "");
         if (!m.parsed || !m.parsed.byKey) m.parsed = FMLParser.parseName(m.folderName);
         if (!Array.isArray(m.files)) m.files = [];
+        // Older projects and manifests stored the star as m.starred
+        if (m.starred) { if (!m.mark) m.mark = "star"; delete m.starred; }
+        if (MARKS.every(function (def) { return def.key !== m.mark; })) delete m.mark;
         m.images = (Array.isArray(m.images) ? m.images : [])
           .filter(function (im) { return im && typeof im === "object" && im.blobId; });
       });

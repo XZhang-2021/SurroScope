@@ -31,6 +31,14 @@
   --star-ink:    #9c6f06;
   --star-wash:   rgba(217, 154, 11, .12);
   --star-edge:   rgba(217, 154, 11, .55);
+  --up:          #1d8a4e;
+  --up-ink:      #13663a;
+  --up-wash:     rgba(29, 138, 78, .10);
+  --up-edge:     rgba(29, 138, 78, .45);
+  --down:        #b4483f;
+  --down-ink:    #8d3630;
+  --down-wash:   rgba(180, 72, 63, .09);
+  --down-edge:   rgba(180, 72, 63, .40);
 
   --shadow-sm:   0 1px 2px rgba(16, 16, 20, .05);
   --shadow:      0 1px 2px rgba(16, 16, 20, .05), 0 4px 14px -6px rgba(16, 16, 20, .10);
@@ -68,6 +76,14 @@
   --star-ink:    #f5cd6b;
   --star-wash:   rgba(240, 180, 41, .16);
   --star-edge:   rgba(240, 180, 41, .55);
+  --up:          #3ec27a;
+  --up-ink:      #7ad6a3;
+  --up-wash:     rgba(62, 194, 122, .14);
+  --up-edge:     rgba(62, 194, 122, .45);
+  --down:        #ef7171;
+  --down-ink:    #f3a0a0;
+  --down-wash:   rgba(239, 113, 113, .12);
+  --down-edge:   rgba(239, 113, 113, .42);
 
   --shadow-sm:   0 1px 2px rgba(0, 0, 0, .35);
   --shadow:      0 1px 2px rgba(0, 0, 0, .40), 0 6px 18px -8px rgba(0, 0, 0, .55);
@@ -147,7 +163,7 @@ html, body {
 }
 .caret-btn:hover { background: var(--accent-wash); color: var(--accent-ink); }
 
-/* ---------------- Star (the "best" model for each dataset) ---------------- */
+/* ---------------- Marks (best / useful / not useful) ---------------- */
 .star-btn {
   font: inherit; font-size: 14px; line-height: 1;
   width: 22px; height: 22px; flex: none;
@@ -165,6 +181,23 @@ html, body {
 }
 .chip.star { background: var(--star-wash); color: var(--star-ink); }
 .chip.star b { color: var(--star-ink); }
+
+/* The three mark buttons sit in one group */
+.mark-group { display: flex; gap: 1px; flex: none; }
+/* Emoji glyphs are wider than a star and get clipped in a 22px box */
+.star-btn.up, .star-btn.down { width: 25px; font-size: 11.5px; }
+.star-btn.up:hover { color: var(--up); background: var(--up-wash); }
+.star-btn.up.on { color: var(--up); }
+.star-btn.down:hover { color: var(--down); background: var(--down-wash); }
+.star-btn.down.on { color: var(--down); }
+.model-card.mark-up { border-color: var(--up-edge); background: var(--up-wash); }
+.model-card.mark-down { border-color: var(--down-edge); background: var(--down-wash); }
+.chip.mark-up { background: var(--up-wash); color: var(--up-ink); }
+.chip.mark-up b { color: var(--up-ink); }
+.chip.mark-down { background: var(--down-wash); color: var(--down-ink); }
+.chip.mark-down b { color: var(--down-ink); }
+.chip-select.mark-up { background: var(--up-wash); color: var(--up-ink); }
+.chip-select.mark-down { background: var(--down-wash); color: var(--down-ink); }
 
 /* ---------------- Banner ---------------- */
 .banner {

@@ -78,10 +78,24 @@ Scroll to **Comparison**, tick the models you want.
 - Switch plot types on and off, or filter by `Samples` / `mem` / `inj` / `rec` / … to narrow the set.
 - Click any image to enlarge; `←` `→` to page, `Esc` to close.
 
-### 4. Mark the winner
+### 4. Mark what you have judged
 
-Click the `☆` next to a model name to mark it the **best** model for that dataset. One star per
-dataset, synced everywhere, saved with the project.
+Three buttons sit next to every model name:
+
+| | Meaning | Limit |
+|---|---|---|
+| `☆` | the **best** model for this dataset | **one per input dataset** — starring another clears the previous star |
+| `👍` | useful, worth keeping | any number |
+| `👎` | not useful, already ruled out | any number |
+
+The three are one rating, so a model carries at most one mark: starring a model you had thumbed up
+replaces the thumb, and clicking the current mark again clears it. Marks are synced everywhere —
+card tint, dataset header (`★ best …` plus `👍 3` `👎 2` counts), both comparison layouts and the
+comparison filter chips — and are saved with the project.
+
+The comparison filter gains a **Mark** row (`★ best` / `👍 useful` / `👎 not useful` / `unmarked`),
+each toggled on its own, so "only the starred and useful ones" or "hide the rejects" is one click.
+The row is hidden while everything in the case carries the same mark.
 
 ### 5. Keep your results (recommended)
 
@@ -142,6 +156,19 @@ subfolders are the model folders — so `report_0909` is expanded, and a model f
 are walked through.
 
 > File formats other than `.mat` work fine — `.h5` / `.npz` / `.pkl` / `.csv` — since only the name is read.
+
+**Re-importing the same folder is safe, and is the intended way to update.** An image whose name is
+already stored is compared **by file modification time**: changed means replace, unchanged means
+skip — no rewrite, no piling up of duplicates. So after retraining a few models, just drop the whole
+parent folder again; the banner says what was updated and what was left alone:
+
+```
+Batch import done: 8 folders, 2 images. (14 unchanged image(s) skipped)
+Checked 8 folders, nothing to update — all 16 image(s) unchanged.
+```
+
+Older files are skipped too, so re-importing a stale copy cannot overwrite a newer result. Picking or
+dropping a file into an image slot by hand always applies — that rule covers folder imports only.
 
 ## How models get filed
 
@@ -225,7 +252,7 @@ If the grouping is not what you want:
 
 - **Double-click a case name to rename it**; renaming it to an **existing case name** merges the two
 - The **"Merge case…"** button in the top-right moves a whole case into another (data, models, images
-  and stars come along)
+  and marks come along)
 - A single model can be moved to any input data of any case via the dropdown on its card
 
 ## The naming convention that is auto-recognised
@@ -349,7 +376,7 @@ single `.json` file — for sending to someone else or as a snapshot backup. Wor
 
 | Feature | Chrome / Edge | Firefox / Safari |
 |---|---|---|
-| All core features (upload, comparison, stars, browser storage) | ✓ | ✓ |
+| All core features (upload, comparison, marks, browser storage) | ✓ | ✓ |
 | **Binding a local folder** (images as real files) | ✓ | ✗ no File System Access API |
 
 On Firefox / Safari, "Storage location" falls back to browser storage and says so; use
