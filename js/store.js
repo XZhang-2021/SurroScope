@@ -1,8 +1,8 @@
-/* IndexedDB 封装：项目元数据 + 图片 Blob
+/* IndexedDB wrapper: project metadata + image blobs
  *
- * 说明：图片以 Blob 原样存进 IndexedDB（不转 base64，省空间）。
- * 实测 Chrome 在 file:// 下可用；若浏览器禁用了 IndexedDB，init() 会 reject，
- * 由 app.js 显示提示。
+ * Images go in as blobs as-is, not base64, which would waste space.
+ * Verified to work in Chrome under file://. If the browser has IndexedDB disabled,
+ * init() rejects and app.js surfaces the message.
  */
 (function (global) {
   "use strict";
@@ -16,7 +16,7 @@
   function init() {
     return new Promise(function (resolve, reject) {
       if (!global.indexedDB) {
-        reject(new Error("此浏览器不支持 IndexedDB"));
+        reject(new Error("This browser does not support IndexedDB"));
         return;
       }
       var req = global.indexedDB.open(DB_NAME, DB_VERSION);
@@ -26,13 +26,13 @@
         if (!d.objectStoreNames.contains(BLOBS)) d.createObjectStore(BLOBS);
       };
       req.onsuccess = function (e) { db = e.target.result; resolve(db); };
-      req.onerror = function () { reject(req.error || new Error("IndexedDB 打开失败")); };
-      req.onblocked = function () { reject(new Error("IndexedDB 被其他标签页占用，请关掉其他页面重试")); };
+      req.onerror = function () { reject(req.error || new Error("Could not open IndexedDB")); };
+      req.onblocked = function () { reject(new Error("IndexedDB is held by another tab - close the other pages and retry")); };
     });
   }
 
   function tx(store, mode) {
-    if (!db) throw new Error("IndexedDB 尚未初始化");
+    if (!db) throw new Error("IndexedDB is not initialised yet");
     return db.transaction(store, mode).objectStore(store);
   }
 
@@ -43,9 +43,10 @@
     });
   }
 
-  /* db.transaction() 是同步抛异常的（数据库没开、被关掉、配额爆了都会抛）。
-     直接 wrap(tx(...).put(...)) 的话这个异常会穿过调用方的 .catch()，
-     结果就是"保存失败了但界面上什么都没发生"。统一在这里转成 rejected promise。 */
+  /* db.transaction() throws synchronously: database not open, closed, quota exceeded …
+     With a bare wrap(tx(...).put(...)) that exception sails straight past the caller's
+     .catch(), so a failed save shows nothing whatsoever in the UI.
+     Every access goes through here, which turns it into a rejected promise instead. */
   function run(store, mode, fn) {
     try { return wrap(fn(tx(store, mode))); }
     catch (e) { return Promise.reject(e); }
@@ -57,7 +58,8 @@
     return run(KV, "readwrite", function (s) { return s.put(project, "project"); });
   }
 
-  /* 通用键值：用来存 FileSystemDirectoryHandle（可被结构化克隆，能直接存进 IndexedDB） */
+  /* Generic key-value store. Used for the FileSystemDirectoryHandle, which is
+     structured-cloneable and so can live in IndexedDB directly. */
   function kvGet(key) { return run(KV, "readonly", function (s) { return s.get(key); }); }
   function kvSet(key, value) { return run(KV, "readwrite", function (s) { return s.put(value, key); }); }
   function kvDel(key) { return run(KV, "readwrite", function (s) { return s.delete(key); }); }
@@ -74,7 +76,7 @@
 
   function allBlobKeys() { return run(BLOBS, "readonly", function (s) { return s.getAllKeys(); }); }
 
-  /** 删除项目里已经引用不到的图片，避免占空间 */
+  /** Delete images the project no longer references, so they stop taking up space */
   function gc(project) {
     var used = {};
     (project.cases || []).forEach(function (c) {
@@ -93,12 +95,13 @@
     return Promise.resolve(null);
   }
 
-  /* 默认的浏览器存储是"尽力保存"级别：磁盘紧张时浏览器有权直接回收。
-     申请持久化能大幅降低被回收的概率。Chrome 按站点活跃度静默决定，
-     Firefox 会弹权限框——所以调用时机要挑在用户真的开始存东西之后。 */
+  /* Browser storage is "best effort" by default: the browser may evict it when disk runs
+     low. Requesting persistence makes that far less likely. Chrome decides silently from
+     site engagement, Firefox shows a permission prompt -- which is why this is called only
+     once the user actually starts storing something. */
   function persisted() {
     if (navigator.storage && navigator.storage.persisted) return navigator.storage.persisted();
-    return Promise.resolve(null);      // null = 浏览器不支持，别当成"未持久化"来吓人
+    return Promise.resolve(null);      // null = unsupported; do not report that as "not persisted" and alarm people
   }
 
   function persist() {

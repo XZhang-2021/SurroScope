@@ -1,14 +1,15 @@
-/* 主逻辑：case / 输入数据 / 模型文件夹 / 图片对比 */
+/* Main logic: cases / input data / model folders / image comparison */
 (function () {
   "use strict";
 
   var t = I18N.t;
 
-  // 浏览器能直接显示的格式
+  // Formats a browser can display directly
   var IMAGE_EXT = /\.(png|apng|jpe?g|jfif|webp|avif|gif|bmp|ico|svgz?|pdf)$/i;
   var VECTOR_EXT = /\.(svgz?|pdf)$/i;
-  // 是图，但浏览器渲染不了（MATLAB 常见输出），碰到要给出明确提示。
-  // 注意不要把 .mat / .log 这类非图形文件放进来，否则提示会误导人。
+  // Images the browser cannot render (common MATLAB output); when one shows up we want
+  // to say so explicitly.
+  // Do not list non-graphics files such as .mat / .log here, or the message misleads.
   var UNVIEWABLE_EXT = /\.(fig|eps|ps|tiff?|emf|wmf|ai|psd)$/i;
 
   var SLOTS = [
@@ -23,7 +24,7 @@
   var lightboxIndex = 0;
   var saveTimer = null;
 
-  // 本地文件夹模式
+  // Local-folder mode
   var dirHandle = null;
   var dirPerm = null;     // 'granted' | 'prompt' | 'denied' | null
 
@@ -37,7 +38,7 @@
     return activeCase();
   }
 
-  /** 按当前模式落盘：本地文件夹 or 浏览器 IndexedDB */
+  /** Persist according to the current mode: a local folder, or the browser's IndexedDB */
   function saveImageBlob(caseObj, model, entry, blob) {
     if (folderReady()) {
       var unique = entry.slot === "other" ? entry.id.slice(-4) : "";
@@ -48,13 +49,14 @@
       });
     }
     delete entry.path;
-    ensurePersist();   // 真的开始往浏览器里存东西了才申请持久化（不阻塞写入）
+    ensurePersist();   // only request persistence once we really start storing in the browser (does not block the write)
     return FMLStore.putBlob(entry.blobId, blob, { name: entry.name, mime: entry.mime });
   }
 
-  /* 只在"往浏览器里存图"时申请一次持久化。
-     不在启动时申请：Firefox 会弹权限框，一打开页面就弹很突兀；
-     文件夹模式也不需要——图片本来就是磁盘文件。 */
+  /* Request persistence exactly once, and only when storing an image in the browser.
+     Not at startup: Firefox shows a permission prompt, and having that appear the moment
+     the page opens is jarring. Folder mode does not need it either -- those images are
+     already files on disk. */
   var persistTried = false;
   function ensurePersist() {
     if (persistTried) return;
@@ -85,7 +87,7 @@
     return FMLStore.deleteBlob(entry.blobId).catch(function () {});
   }
 
-  // ---------------- 小工具 ----------------
+  // ---------------- Small helpers ----------------
   function el(tag, attrs, kids) {
     var n = document.createElement(tag);
     if (attrs) Object.keys(attrs).forEach(function (k) {
@@ -112,7 +114,7 @@
     if (b < 1073741824) return (b / 1048576).toFixed(1) + " MB";
     return (b / 1073741824).toFixed(1) + " GB";
   }
-  /** 多选项确认框，返回被点中的 key（Esc / 点背景 = null） */
+  /** Multi-choice dialog; resolves with the key that was clicked (Esc / backdrop = null) */
   function ask(title, body, choices) {
     return new Promise(function (resolve) {
       var box = $("askBox");
@@ -154,7 +156,7 @@
     saveTimer = setTimeout(function () {
       FMLStore.saveProject(project).then(function () {
         updateStorageInfo();
-        // 文件夹模式下同时写一份清单，换电脑时靠它恢复
+        // In folder mode also write the manifest -- that is what restores the project elsewhere
         if (folderReady()) {
           return FMLDir.writeJSON(dirHandle, {
             format: "fml-compare-project", version: 1,
@@ -169,7 +171,7 @@
     }, 200);
   }
 
-  var persistedState = null;   // true / false / null(浏览器不支持)
+  var persistedState = null;   // true / false / null (browser does not support it)
 
   function updateStorageInfo() {
     FMLStore.estimate().then(function (est) {
@@ -177,14 +179,14 @@
       var txt = est.quota
         ? t("storage.usage", { used: fmtBytes(est.usage), quota: fmtBytes(est.quota) })
         : t("storage.used", { size: fmtBytes(est.usage) });
-      // 只有"图片确实存在浏览器里"时才提醒可能被回收；文件夹模式下图片在磁盘上
+      // Only warn about eviction when the images really are in the browser; in folder mode they are on disk
       if (!folderReady() && persistedState === false) txt += t("storage.notPersisted");
       else if (!folderReady() && persistedState === true) txt += t("storage.isPersisted");
       $("storageInfo").textContent = txt;
     });
   }
 
-  // ---------------- 状态存取 ----------------
+  // ---------------- Project state ----------------
   function activeCase() {
     if (!project.activeCaseId) return null;
     return project.cases.filter(function (c) { return c.id === project.activeCaseId; })[0] || null;
@@ -197,26 +199,27 @@
     return c;
   }
 
-  // ---------------- 输入数据 ----------------
+  // ---------------- Input data ----------------
   function addInputFiles(fileList) {
     var touched = null;
     Array.prototype.forEach.call(fileList, function (f) {
       var parsed = FMLParser.parseName(f.name);
       var c = findOrCreateCase(caseNameFor(f.name));
-      // 按去掉扩展名的名字比对：推导出来的那份没有扩展名，用户传的可能是 .mat/.h5/.npz
+      // Compare on the extension-less name: an inferred entry has no extension, while the
+      // file the user uploads may be .mat / .h5 / .npz
       var stem = FMLParser.stripExt(f.name);
       var dup = c.inputs.filter(function (i) { return FMLParser.stripExt(i.filename) === stem; })[0];
       if (!dup) {
         c.inputs.push({ id: uid(), filename: f.name, parsed: parsed });
       } else {
-        delete dup.derived;      // 之前是推导出来的，现在真文件传上来了
-        dup.filename = f.name;   // 用真实文件名（带上真正的扩展名）
+        delete dup.derived;      // was inferred; the real file has now been uploaded
+        dup.filename = f.name;   // use the real file name, extension included
         dup.parsed = parsed;
       }
       touched = c;
     });
     if (touched) project.activeCaseId = touched.id;
-    reassignAll();          // 新输入数据可能让之前"未归类"的模型找到归属
+    reassignAll();          // new input data may give previously unassigned models a home
     save(); render();
   }
 
@@ -235,27 +238,29 @@
     return out;
   }
 
-  // ---------------- 模型文件夹（支持一次多个） ----------------
-  /** 只当模型文件夹：输入数据靠参数去猜 */
+  // ---------------- Model folders (several at a time) ----------------
+  /** Treat as a model folder only; the input data is guessed from the parameters */
   function addModelFolder(entries) { importFolders(entries, false); }
 
-  /** 一步上传：文件夹名同时给出模型名和输入数据名（_L3N10 之前的部分） */
+  /** One-step upload: the folder name yields both the model name and the input data name
+      (the part before _L3N10) */
   function addResultFolder(entries) { importFolders(entries, true); }
 
-  /** <input> 给的是扁平 File 列表，统一成 {file, path} */
+  /** An <input> hands over a flat File list; normalise it to {file, path} */
   function toEntries(fileList) {
     return Array.prototype.slice.call(fileList).map(function (f) {
       return { file: f, path: f.webkitRelativePath || f.name };
     });
   }
 
-  /** 名字里有 2 个以上非日期参数才像模型文件夹（"report_0909" 这种就不像） */
+  /** A name needs more than 2 non-date parameters to look like a model folder
+      ("report_0909" does not) */
   function looksLikeModelName(name) {
     var p = FMLParser.parseName(name);
     return p.params.filter(function (x) { return x.key !== "date"; }).length >= 2;
   }
 
-  /** prefix 是不是 name 的"整 token 前缀"（airfoil 是 airfoil_gp_rbf 的前缀） */
+  /** Is prefix a whole-token prefix of name? (airfoil is one for airfoil_gp_rbf) */
   function isTokenPrefix(prefix, name) {
     if (!prefix) return false;
     var a = FMLParser.stripExt(prefix).split("_").filter(Boolean);
@@ -265,47 +270,53 @@
   }
 
   /**
-   * 决定一个文件夹/文件该归到哪个 case。
-   * 名字符合已知命名规则 -> 沿用解析出的前缀（你自己的数据行为不变）。
-   * 认不出来的命名 -> 前缀规则会把区分模型的部分整个吞掉、每个模型自成一个 case，
-   * 所以改成：优先并入"名字正好是它 token 前缀"的已有 case，
-   * 否则取本批里认不出的那些名字的公共前缀。
+   * Decide which case a folder or file belongs to.
+   * Name follows a known convention -> use the parsed prefix (your own data is unaffected).
+   * Unrecognised name -> the prefix rule would swallow the part that distinguishes the
+   * models and give every model a case of its own. So instead: prefer an existing case
+   * whose name is exactly a token prefix of this name, and otherwise fall back to the
+   * first token.
    */
-  var NO_PREFIX_CASE = "default";   // 名字第一个 token 就是参数时用的 case 名（可双击改名）
+  var NO_PREFIX_CASE = "default";   // case name used when the first token is already a parameter
+                                    // (double-click the tab to rename)
 
   function caseNameFor(name) {
     if (looksLikeModelName(name)) {
-      // 名字整个由参数组成（20k_heter_mem20_…）时前缀是空的。退回"第一个 token"
-      // 会按样本量把 20k / 40k 拆成两个 case，而样本量本该是 case 内部的一个筛选项，
-      // 所以这些统一落到同一个默认 case 里。
+      // A name made entirely of parameters (20k_heter_mem20_…) has an empty prefix.
+      // Falling back to "the first token" would split 20k / 40k into two cases, when the
+      // sample size is supposed to be a filter *inside* a case. So they all land in one
+      // default case instead.
       return FMLParser.parseName(name).prefix || NO_PREFIX_CASE;
     }
 
-    // 已有 case 的名字正好是它的 token 前缀 -> 并进去
+    // An existing case name that is exactly a token prefix of this one -> join it
     var hit = project.cases.filter(function (c) { return isTokenPrefix(c.name, name); })
       .sort(function (a, b) { return b.name.length - a.name.length; })[0];
     if (hit) return hit.name;
 
-    // 否则按第一个 token 归组。故意不用"整批公共前缀"——那样结果会随这批里
-    // 有哪些文件夹而变（单个导入和批量导入结果不一致）。第一个 token 稳定、
-    // 与导入顺序无关；分多了可以用「合并 case…」并起来。
+    // Otherwise group by the first token. Deliberately not "the common prefix of this
+    // batch": that would make the result depend on which folders happen to be in the
+    // batch, so importing one at a time would disagree with importing them together.
+    // The first token is stable and order-independent; over-splitting can be undone
+    // with "Merge case…".
     var tokens = FMLParser.stripExt(name).split("_").filter(Boolean);
     return tokens[0] || name;
   }
 
-  /** depth 层的目录里是不是直接躺着图片（depth = 这个目录本身占了几段路径） */
+  /** Does the directory at this depth hold images directly?
+      (depth = how many path segments the directory itself occupies) */
   function hasImagesAt(entries, depth) {
     return entries.some(function (en) {
       return en.path.split("/").length === depth + 1 && IMAGE_EXT.test(en.file.name);
     });
   }
 
-  /** 按 depth 层切出子目录：{名字 -> entries}，保持出现顺序 */
+  /** Slice out the subdirectories at this depth: {name -> entries}, in order of appearance */
   function subDirsOf(entries, depth) {
     var map = {}, order = [];
     entries.forEach(function (en) {
       var parts = en.path.split("/");
-      if (parts.length <= depth + 1) return;      // 直接躺在这一层的文件，不是子目录
+      if (parts.length <= depth + 1) return;      // a file sitting at this level, not a subdirectory
       if (!map[parts[depth]]) { map[parts[depth]] = []; order.push(parts[depth]); }
       map[parts[depth]].push(en);
     });
@@ -313,15 +324,17 @@
   }
 
   /**
-   * 递归判定哪些目录是"结果文件夹"。
+   * Recursively work out which directories are "result folders".
    *
-   * 难点：<模型名>/figures/traj.png 和 report_0909/<模型名>/traj.png 结构一模一样，
-   * 只能靠名字区分。规则：
-   *   - 这一层直接躺着图片 -> 它就是模型（checkpoints/ logs/ 之类只当附属目录）
-   *   - 子目录里有"像模型"的 -> 这一层只是容器，逐个下钻
-   *     （父目录名本身像模型名时，子目录也必须像模型名才算 —— 否则 figures/ 会被
-   *      当成模型，把真正的模型名丢掉）
-   *   - 都不像但更深处还有图（runs/2026-09/<模型>/…）-> 继续往下找
+   * The hard part: <model name>/figures/traj.png and report_0909/<model name>/traj.png
+   * have identical structure, so only the names can tell them apart. The rules:
+   *   - images sit directly in this level -> this is the model
+   *     (checkpoints/, logs/ and friends count as attached directories)
+   *   - a subdirectory looks like a model -> this level is just a container, descend
+   *     (when the parent name itself looks like a model name, the subdirectory has to
+   *      look like one too -- otherwise figures/ would be taken for the model and the
+   *      real model name would be lost)
+   *   - neither, but there are images further down (runs/2026-09/<model>/…) -> keep going
    */
   function collectModelFolders(name, entries, depth, out) {
     var ownImages = hasImagesAt(entries, depth);
@@ -340,7 +353,8 @@
       out.push({ folderName: name, entries: entries, depth: depth });
       return;
     }
-    // 中间目录：自己没有图、子目录也不像模型，但更深处还有图，说明只是层级包装
+    // An intermediate directory: no images of its own, no model-like subdirectory, but
+    // images further down -- so it is only a wrapper level
     var deeperImages = entries.some(function (en) {
       return en.path.split("/").length > depth + 2 && IMAGE_EXT.test(en.file.name);
     });
@@ -351,7 +365,7 @@
     out.push({ folderName: name, entries: entries, depth: depth });
   }
 
-  /** 把一堆 {file, path} 分成若干"模型文件夹" */
+  /** Split a pile of {file, path} into model folders */
   function groupIntoModelFolders(entries) {
     var byTop = {}, order = [];
     entries.forEach(function (en) {
@@ -365,7 +379,8 @@
     return out;
   }
 
-  /** 把异常整理成一句人能看懂的话（Chrome 的 DOMException.message 常常很含糊，得带上 name） */
+  /** Turn an exception into one readable sentence. Chrome's DOMException.message is often
+      vague on its own, so the name has to come along. */
   function errText(e) {
     if (!e) return "unknown error";
     var name = e.name ? e.name : "";
@@ -374,10 +389,11 @@
   }
 
   function noteFailure(stats, what, e) {
-    // 网页拿不到磁盘绝对路径，只能给相对路径长度（真实路径还要更长）
+    // A page cannot see the absolute path, so only the relative length is available
+    // (the real one is longer still)
     stats.failures.push({ what: what, err: errText(e), pathLen: String(what).length });
-    // 控制台留全量堆栈，界面只给摘要
-    console.error("[fml] 处理失败:", what, e);
+    // Full stack goes to the console; the UI only gets the summary
+    console.error("[fml] failed to process:", what, e);
   }
 
   function importFolders(entries, deriveInput) {
@@ -388,7 +404,7 @@
                   failures: [], noImage: [] };
     banner(t("msg.reading"), false);
 
-    // 单个文件夹/单张图失败不再让整批中断
+    // One bad folder or image no longer aborts the whole batch
     serialChain(groups.map(function (g) {
       return function () {
         return processFolder(g, deriveInput, stats).catch(function (e) {
@@ -402,7 +418,8 @@
         var msg = t("msg.importPartial", {
           folders: stats.folders, images: stats.images, failed: stats.failures.length
         }) + " " + t("msg.itemFailed", { what: f0.what, e: f0.err });
-        // 把两类最常见的失败翻译成"该怎么办"，而不是丢一个错误名给用户
+        // Translate the two most common failures into what to do about them, rather than
+        // throwing an error name at the user
         if (/QuotaExceeded/i.test(f0.err)) {
           msg += t("msg.hintQuota");
         } else if (/NotFoundError/.test(f0.err) && f0.pathLen) {
@@ -410,13 +427,14 @@
         }
         banner(msg, true);
       } else if (!stats.images && stats.noImage.length) {
-        // 一张图都没进来：说清楚是格式不支持，还是里面本来就没图
+        // Not a single image made it: say whether the format is unsupported, or there
+        // simply were no images
         var d = stats.noImage[0];
         var list = (d.unviewable.length ? d.unviewable : d.names).slice(0, 4).join("、");
         if (d.names.length > 4) list += " …";
         banner(t(d.unviewable.length ? "msg.noImgUnviewable" : "msg.noImgFound",
           { name: d.folder, list: list }), true);
-        console.warn("[fml] 没识别出图片，文件夹内容:", d.folder, d.names);
+        console.warn("[fml] no images recognised, folder contents:", d.folder, d.names);
       } else if (groups.length > 1) {
         banner(stats.images
           ? t("msg.batchImported", { folders: stats.folders, images: stats.images })
@@ -458,7 +476,7 @@
 
     var inputName = null;
     if (deriveInput) {
-      // 文件夹名直接给出了归属，不要再被自动归类改掉
+      // The folder name states the assignment outright; automatic filing must not override it
       var inp = ensureDerivedInput(c, model);
       inputName = inp.filename;
       model.inputId = inp.id;
@@ -468,14 +486,15 @@
     }
     project.activeCaseId = c.id;
 
-    // 只把文件夹里的图片读出来存起来，其他文件一律不读内容
+    // Only the images are read and stored; the contents of every other file are left alone
     var images = group.entries.filter(function (en) { return IMAGE_EXT.test(en.file.name); });
     stats.folders++;
     stats.files += group.entries.length;
     stats.last = folderName;
     stats.lastInput = inputName;
 
-    // 一张图都没识别出来时，记下里面到底有什么，好让提示条说清楚原因
+    // When nothing was recognised, record what is actually in there so the banner can
+    // explain why
     if (!images.length && group.entries.length) {
       var names = group.entries.map(function (en) { return en.file.name; });
       stats.noImage.push({
@@ -495,15 +514,18 @@
   }
 
   /**
-   * 判断一张图属于哪个槽位。
+   * Work out which slot an image belongs to.
    *
-   * 坑：文件名常常是「<模型文件夹名>_traj.png」，而模型名里随便一个 token 就可能
-   * 撞上槽位关键词（randiSameNumPerTraj 含 Traj、..._pred_... 含 pred），
-   * 拿整个文件名去匹配的话 _error.png 会先命中轨迹图规则，然后两张图挤进同一个槽位，
-   * 互相把对方删掉。所以只看"真正用于区分的那一小段"：
-   *   1. 去掉和文件夹名重复的前缀
-   *   2. 还是匹配不上，就把文件夹名里出现过的 token 逐个从文件名里删掉再看
-   * 绝不拿原始文件名兜底 —— 那正是误判的来源。
+   * The trap: file names are often "<model folder name>_traj.png", and any token of the
+   * model name can collide with a slot keyword (randiSameNumPerTraj contains Traj,
+   * ..._pred_... contains pred). Matching against the whole file name makes _error.png
+   * hit the trajectory rule first, which puts two images in one slot where they delete
+   * each other. So only the fragment that actually distinguishes them is inspected:
+   *   1. strip the prefix repeated from the folder name
+   *   2. if that still does not match, remove every token of the folder name from the
+   *      file name and try again
+   * The raw file name is never used as a fallback -- that is exactly where the
+   * misclassification came from.
    */
   function classify(filename, folderName) {
     var base = String(filename).replace(/\.[a-z0-9]{1,6}$/i, "");
@@ -514,7 +536,7 @@
     if (folderName) {
       folderName.split(/[_\-.\s]+/)
         .filter(function (tok) { return tok.length >= 2; })
-        .sort(function (a, b) { return b.length - a.length; })   // 先删长的，免得剩下子串
+        .sort(function (a, b) { return b.length - a.length; })   // longest first, so no substrings survive
         .forEach(function (tok) { cleaned = cleaned.split(tok).join(" "); });
     }
 
@@ -537,11 +559,14 @@
     var caseObj = caseOfModel(model);
     return saveImageBlob(caseObj, model, entry, file).then(function () {
       if (!slotDef.multi) {
-        // 单图槽：替换旧的。
-        // 坑：文件夹模式下路径只由 <case>/<模型>/<槽位>.<扩展名> 决定，和具体是哪张图无关，
-        // 所以刚写下去的新图和被替换的旧图很可能是同一个文件 —— 这时再去删"旧的"
-        // 等于把刚写好的新图一起删掉（重新拖一次训练结果就会触发）。
-        // 覆盖写本身已经完成了替换，路径相同就只清掉内存里的引用。
+        // Single-image slot: replace whatever is there.
+        // The trap: in folder mode the path is decided purely by
+        // <case>/<model>/<slot>.<ext>, with no reference to which image it is, so the
+        // file just written and the "old" one being replaced are very often the same
+        // file -- deleting the old entry then deletes the image just written. Re-dropping
+        // a retrained result folder is enough to trigger it.
+        // The overwrite already performed the replacement, so when the paths match we
+        // only drop the in-memory reference.
         model.images.filter(function (im) { return im.slot === slotKey; }).forEach(function (im) {
           if (!(im.path && entry.path && im.path === entry.path)) removeImageBlob(im);
           releaseUrl(im.blobId);
@@ -563,16 +588,19 @@
     if (urlCache[blobId]) { URL.revokeObjectURL(urlCache[blobId]); delete urlCache[blobId]; }
   }
 
-  // ---------------- 输入数据 <- 模型 归属关系 ----------------
+  // ---------------- Which input data a model belongs to ----------------
   function inputOf(c, model) {
     if (!model.inputId) return null;
     return c.inputs.filter(function (i) { return i.id === model.inputId; })[0] || null;
   }
 
-  /** 按模型名推导出它自己那份输入数据（没有就建一个，标记为"推导"） */
+  /** Infer a model's own input data from its name, creating it (marked "inferred")
+      if it does not exist yet */
   function ensureDerivedInput(c, model) {
-    // 文件夹名整个都是超参数时 dataset 会是空的，那就退回用完整文件夹名。
-    // 不再硬加 ".mat"：别人可能用 .h5 / .npz / .pkl，真文件传进来时按 stem 对上就行。
+    // When the folder name is nothing but hyperparameters, dataset comes back empty;
+    // fall back to the full folder name.
+    // No longer forces a ".mat" suffix: people also use .h5 / .npz / .pkl, and matching
+    // on the stem is enough when the real file arrives.
     var split = FMLParser.splitModelName(model.folderName);
     var name = split.dataset || FMLParser.stripExt(model.folderName);
     var inp = c.inputs.filter(function (i) { return FMLParser.stripExt(i.filename) === name; })[0];
@@ -580,7 +608,7 @@
       inp = {
         id: uid(), filename: name,
         parsed: FMLParser.parseName(name),
-        derived: true               // 还没上传过真正的 .mat
+        derived: true               // the real .mat has not been uploaded yet
       };
       c.inputs.push(inp);
     }
@@ -588,24 +616,28 @@
   }
 
   /**
-   * 给模型找它的输入数据。
-   * mem / inj / rec / 采样 … 每一个都是自变量，所以"差一个参数"就是**另一份数据**，
-   * 不能挂到最接近的那份上（那样只会造出一堆假的"参数不一致"告警）。
-   * 因此：签名完全一致才认；否则按模型名推导出它自己的那份。
+   * Find a model's input data.
+   * mem / inj / rec / sampling … are each an independent variable, so "one parameter off"
+   * means *a different dataset*. Attaching to the closest match would only manufacture a
+   * pile of bogus "parameter mismatch" warnings.
+   * Hence: only an exact signature match counts; otherwise infer the model's own.
    */
   function autoAssignInput(c, model) {
     if (model.inputPinned) return;
 
-    // 签名为空 = 名字里一个数据参数都没认出来。这时"签名相同"并不代表"同一份数据"：
-    // airfoil_meshA / airfoil_meshB 的签名都是空的，按空签名匹配只会挂到碰巧排在
-    // 第一个的那份上，而且因为差异列表也是空的，连告警都不会有。只能按名字推导。
+    // An empty signature means not one data parameter was recognised in the name, and
+    // then "same signature" does not mean "same dataset": airfoil_meshA and
+    // airfoil_meshB both have an empty one, so matching on it would just attach to
+    // whichever happens to come first -- with an empty diff list, not even a warning.
+    // Inferring from the name is the only honest option.
     var sig = FMLParser.datasetSignature(model.parsed);
     if (sig) {
       var exact = c.inputs.filter(function (i) {
         return FMLParser.datasetSignature(i.parsed) === sig;
       });
       if (exact.length) {
-        // 日期不参与签名（文件夹日期常和数据日期差一两天），但同日期的优先
+        // The date is not part of the signature (folder and data dates are often a day
+        // or two apart), but a matching date still wins
         var sameDate = exact.filter(function (i) {
           return i.parsed.byKey.date === model.parsed.byKey.date;
         });
@@ -616,7 +648,8 @@
     model.inputId = ensureDerivedInput(c, model).id;
   }
 
-  /** 输入数据有增删后重新归类（手动指定过的保持不动，除非目标没了） */
+  /** Re-file everything after input data is added or removed. Manual assignments stay
+      put unless their target is gone. */
   function reassignAll() {
     project.cases.forEach(function (c) {
       (c.models || []).forEach(function (m) {
@@ -626,8 +659,8 @@
     });
   }
 
-  /* 每份输入数据一套底色，让"这些模型属于同一个 .mat"一眼可见。
-     用 rgba 叠在卡片底色上，浅色/深色两套主题都能用。 */
+  /* One tint per input data, so "these models came from the same .mat" is visible at a
+     glance. Layered as rgba over the card background, which works in both themes. */
   var GROUP_TINTS = [
     { edge: "#2a6fd6", head: "rgba(42,111,214,.10)", card: "rgba(42,111,214,.045)" },
     { edge: "#12968c", head: "rgba(18,150,140,.11)", card: "rgba(18,150,140,.05)"  },
@@ -643,7 +676,7 @@
     return i < 0 ? null : GROUP_TINTS[i % GROUP_TINTS.length];
   }
 
-  /* ---- 星标：每份输入数据下只留一个"最好"的模型 ---- */
+  /* ---- Star: at most one "best" model per input data ---- */
   function toggleStar(c, model) {
     var was = !!model.starred;
     c.models.forEach(function (m) {
@@ -669,7 +702,7 @@
     })[0] || null;
   }
 
-  /** 输入数据的短名：去掉和 case 名重复的前缀 */
+  /** Short label for an input data: drop the prefix it shares with the case name */
   function inputShort(inp) {
     var raw = inp.filename.replace(/\.(mat|zip|tar|gz)$/i, "");
     var p = inp.parsed.prefix;
@@ -695,10 +728,11 @@
   }
 
   /**
-   * 删掉一份输入数据。
-   * alsoModels = true  -> 它下面的模型和图片一起删
-   * alsoModels = false -> 模型保留，标成"用户指定的未归类"
-   *   （必须打上 pinned，否则自动归类会立刻按模型名把这份数据重新推导出来，等于删不掉）
+   * Delete one input data.
+   * alsoModels = true  -> its models and their images go too
+   * alsoModels = false -> the models stay, marked as user-designated unassigned
+   *   (pinned is mandatory: otherwise automatic filing immediately re-infers the dataset
+   *    from the model names, and the delete effectively does nothing)
    */
   function removeInput(c, inp, alsoModels) {
     var affected = c.models.filter(function (m) { return m.inputId === inp.id; });
@@ -741,7 +775,8 @@
               if (confirm(t("confirm.deleteInputEmpty", { name: inp.filename }))) removeInput(c, inp, false);
               return;
             }
-            // 下面挂着模型 -> 让用户选：一起删，还是留成未归类
+            // It has models under it -> let the user choose: delete them too, or keep
+            // them as unassigned
             ask(t("ask.deleteInput.title"),
                 t("ask.deleteInput.body", { name: inp.filename, n: models.length }), [
               { key: "cancel", label: t("ask.cancel") },
@@ -753,7 +788,7 @@
           }
         })
       ]));
-      // 这份数据下被标为"最好"的模型，直接在表头列出来
+      // Show the model starred as best for this dataset right in the header
       var best = starredOf(c, inp);
       var chips = paramChips(inp.parsed, null, false);
       if (best) {
@@ -843,7 +878,7 @@
     return card;
   }
 
-  /** 一键折叠 / 展开当前 case 下所有模型的图片 */
+  /** Collapse or expand the images of every model in the current case */
   function setAllCollapsed(collapsed) {
     var c = activeCase();
     if (!c) return;
@@ -851,7 +886,7 @@
     save(); render();
   }
 
-  /** 一个下拉搞定：换输入数据 + 跨 case 移动 */
+  /** One dropdown does both: change input data, and move across cases */
   function inputSelect(curCase, model) {
     var curVal = curCase.id + "|" + (model.inputId || "");
     var sel = el("select", {
@@ -904,7 +939,7 @@
 
       if (sd.multi) {
         imgs.forEach(function (im) { wrap.appendChild(slotBox(m, sd, im)); });
-        wrap.appendChild(slotBox(m, sd, null));   // 追加位
+        wrap.appendChild(slotBox(m, sd, null));   // the append slot
       } else {
         wrap.appendChild(slotBox(m, sd, imgs[0] || null));
       }
@@ -912,9 +947,11 @@
     return wrap;
   }
 
-  /* 手动往图片槽里传图也会失败（浏览器配额满、文件夹权限被收回、Windows 路径超长）。
-     没有这个 catch 的话文件框一关就什么都没发生，连提示都没有 —— 而配额和长路径
-     这两种最常见的失败，提示文案其实早就写好了，只是导入流程独占着。 */
+  /* Uploading into a slot by hand can fail too: browser quota exhausted, folder
+     permission revoked, a Windows path over the limit. Without this catch the file dialog
+     simply closes and nothing happens at all -- no message. And the two most common
+     failures, quota and long paths, already have remediation text written; it was just
+     reachable only from the import flow. */
   function slotUpload(m, slotKey, file) {
     storeImage(m, slotKey, file).then(function () {
       save(); render();
@@ -923,7 +960,7 @@
       var msg = t("msg.itemFailed", { what: file.name, e: err });
       if (/QuotaExceeded/i.test(err)) msg += t("msg.hintQuota");
       banner(msg, true);
-      console.error("[fml] 图片保存失败:", file.name, e);
+      console.error("[fml] could not save image:", file.name, e);
     });
   }
 
@@ -932,7 +969,7 @@
       type: "file", accept: "image/*,.pdf,.svg", hidden: true,
       onchange: function () {
         if (input.files && input.files[0]) slotUpload(m, slotDef.key, input.files[0]);
-        input.value = "";        // 不清空的话再选同一个文件不会触发 change
+        input.value = "";        // without this, re-picking the same file fires no change event
       }
     });
 
@@ -961,8 +998,9 @@
     ]));
 
     if (image) {
-      // 在这个模型自己的图片之间翻页。不能用 collectImages()：那是对比区筛过的列表，
-      // 数据树里的缩略图却是全量渲染的，取消勾选的模型一点就会翻到别人的图上去。
+      // Page through this model's own images. collectImages() must not be used: that list
+      // is filtered by the comparison view, while the tree renders a thumbnail for every
+      // model -- clicking an unticked model's thumbnail would jump to someone else's image.
       box.appendChild(mediaNode(image, "slot-thumb", function () {
         openLightbox(modelImages(m), image.id);
       }));
@@ -977,7 +1015,7 @@
     return box;
   }
 
-  /** 按类型生成 <img> 或 <embed>（pdf） */
+  /** Build an <img>, or an <embed> for a pdf */
   function mediaNode(image, cls, onClick) {
     var url = urlCache[image.blobId];
     if (!url) {
@@ -992,11 +1030,11 @@
     return el("img", { class: cls, src: url, alt: image.name, loading: "lazy", onclick: onClick });
   }
 
-  // ---------------- 对比区 ----------------
-  // ---------------- 参数筛选 ----------------
+  // ---------------- Comparison ----------------
+  // ---------------- Parameter filters ----------------
   var FILTER_KEYS = ["size", "mem", "inj", "rec", "log", "sample"];
 
-  /** 取模型的某个参数值；模型名里没有就退回它挂靠的输入数据 */
+  /** Read one parameter off a model; if its name lacks it, fall back to its input data */
   function paramValueOf(c, m, key) {
     var v = m.parsed.byKey[key];
     if (v !== undefined) return v;
@@ -1004,7 +1042,8 @@
     return inp ? inp.parsed.byKey[key] : undefined;
   }
 
-  /** 当前 case 里每个参数有哪些取值（只保留取值多于一个的，否则筛了也没意义） */
+  /** Which values each parameter takes in this case. Only those with more than one value
+      are kept -- filtering on a single value is pointless. */
   function filterableParams(c) {
     var out = [];
     FILTER_KEYS.forEach(function (key) {
@@ -1025,7 +1064,7 @@
     return out;
   }
 
-  /** 没设置过的参数默认全选 */
+  /** A parameter that has never been touched starts fully selected */
   function filterState(c) {
     if (!c._filters) c._filters = {};
     filterableParams(c).forEach(function (p) {
@@ -1033,7 +1072,7 @@
         c._filters[p.key] = {};
         p.values.forEach(function (v) { c._filters[p.key][v] = true; });
       } else {
-        // 新出现的取值默认也选上
+        // newly appeared values start selected too
         p.values.forEach(function (v) {
           if (c._filters[p.key][v] === undefined) c._filters[p.key][v] = true;
         });
@@ -1049,13 +1088,13 @@
       var key = params[i].key;
       if (!f[key]) continue;
       var v = paramValueOf(c, m, key);
-      if (v === undefined) continue;          // 没这个参数的模型不被筛掉
+      if (v === undefined) continue;          // a model without this parameter is never filtered out
       if (!f[key][v]) return false;
     }
     return true;
   }
 
-  /* ---- 图片类型筛选：只看轨迹图 / 只看误差图 / 都看 ---- */
+  /* ---- Plot-type filter: trajectories only / errors only / both ---- */
   function slotTypesPresent(c) {
     return SLOTS.filter(function (sd) {
       return c.models.some(function (m) {
@@ -1079,7 +1118,7 @@
     wrap.innerHTML = "";
     var params = filterableParams(c);
     var types = slotTypesPresent(c);
-    var showTypes = types.length > 1;          // 只有一种图时筛了也没意义
+    var showTypes = types.length > 1;          // with only one type, filtering is pointless
     if (!params.length && !showTypes) return;
     filterState(c);
     slotState(c);
@@ -1152,7 +1191,7 @@
 
   function selectedModelIds(c) {
     if (!c._selected) c._selected = {};
-    // 后加入的模型默认也勾上
+    // models added later start ticked as well
     c.models.forEach(function (m) {
       if (c._selected[m.id] === undefined) c._selected[m.id] = true;
     });
@@ -1168,7 +1207,8 @@
     if (!c.models.length) return;
     selectedModelIds(c);
 
-    // 勾选框也按输入数据分组，一眼看出哪些模型是同一份数据训出来的；被参数筛掉的不列出来
+    // Group the checkboxes by input data too, so it is obvious which models share a
+    // dataset. Models removed by the parameter filters are not listed.
     var visible = c.models.filter(function (m) { return modelPassesFilter(c, m); });
     var groups = [];
     c.inputs.forEach(function (i) {
@@ -1179,7 +1219,7 @@
     if (loose.length) groups.push({ label: t("group.unassigned"), title: "", models: loose, tint: null });
 
     groups.forEach(function (g) {
-      // 小圆点用和上面分组一样的底色，两个区域对得上
+      // The dot reuses the group tint from above, so the two areas line up
       var block = el("div", { class: "cmp-filter-group" }, [
         el("div", { class: "cmp-filter-label", title: g.title }, [
           el("span", { class: "g-dot", style: "background:" + (g.tint ? g.tint.edge : "var(--ink-3)") }),
@@ -1201,7 +1241,8 @@
     });
   }
 
-  /** 模型显示名：去掉和 case 名重复的前缀，只留后面区分度高的部分 */
+  /** Display name for a model: drop the prefix shared with the case name, keep the
+      distinguishing tail */
   function shortName(m) {
     var raw = m.folderName;
     var pfx = m.parsed.prefix;
@@ -1211,8 +1252,9 @@
     return tail.length ? tail.join(" · ") : (rest || raw);
   }
 
-  /* 只按超参数命名时，"Layer3 Node10" 可能好几个模型都一样（它们差在数据参数上）。
-     这里给重名的补上真正有区别的那几个参数。 */
+  /* Named by hyperparameters alone, several models can all read "Layer3 Node10" while
+     actually differing in their data parameters. This appends whichever parameters
+     actually tell the duplicates apart. */
   var labelMap = {};
 
   function computeLabels(c) {
@@ -1229,7 +1271,8 @@
       var peers = byLabel[base[m.id]];
       if (peers.length < 2) { labelMap[m.id] = base[m.id]; return; }
 
-      // 贪心地只挑"能把它和同名模型区分开"的最少几个参数，避免标签写成一长串
+      // Greedily take the fewest parameters that separate it from its namesakes, so the
+      // label does not turn into a long string
       var extra = [];
       var remaining = peers;
       FILTER_KEYS.concat(["injMode", "medium"]).forEach(function (k) {
@@ -1339,8 +1382,9 @@
       });
     }
 
-    // 别留一片空白；区分"模型被筛没了"和"图片类型全关了"
-    // 只看实际存在的类型 —— "其他"默认开着但可能一张图都没有
+    // Do not leave a blank area; distinguish "the filters removed every model" from
+    // "every plot type is switched off". Only types that actually exist count -- "Other"
+    // is on by default but may hold no images at all.
     if (!area.children.length) {
       var present = slotTypesPresent(c);
       var anySlot = !present.length || present.some(function (sd) { return slotOn(c, sd.key); });
@@ -1350,7 +1394,7 @@
   }
 
   // ---------------- lightbox ----------------
-  /** 某个模型自己的全部图片（按槽位顺序），用于数据树里的缩略图翻页 */
+  /** Every image of one model, in slot order; used for paging from a tree thumbnail */
   function modelImages(m) {
     var out = [];
     SLOTS.forEach(function (sd) {
@@ -1363,7 +1407,8 @@
 
   function openLightbox(list, imageId) {
     var idx = list.findIndex(function (x) { return x.image.id === imageId; });
-    if (idx < 0) return;      // 点中的图不在这份列表里：宁可不开，也别开成别人的图
+    if (idx < 0) return;      // clicked image is not in this list: better not to open at
+                              // all than to open someone else's
     lightboxList = list;
     lightboxIndex = idx;
     showLightbox();
@@ -1394,7 +1439,7 @@
   }
   function closeLightbox() { $("lightbox").hidden = true; $("lbStage").innerHTML = ""; }
 
-  // ---------------- 导出 / 导入 ----------------
+  // ---------------- Export / import ----------------
   function blobToDataUrl(blob) {
     return new Promise(function (res, rej) {
       var r = new FileReader();
@@ -1413,8 +1458,9 @@
   }
 
   function exportProject() {
-    // 文件夹模式下还没恢复访问时，每张图都读不出来，导出的会是一份"只有元数据"的空壳。
-    // 而页脚恰好建议用户在换电脑前先导出——不拦住的话备份会静悄悄地丢掉全部图片。
+    // In folder mode before access is restored, every image is unreadable and the export
+    // would be a metadata-only shell. The footer happens to advise exporting before
+    // switching machines -- without this guard the backup silently loses every image.
     if (dirHandle && !folderReady()) { banner(t("msg.exportNeedAccess"), true); return; }
 
     banner(t("msg.packing"), false);
@@ -1423,9 +1469,12 @@
       c.models.forEach(function (m) { m.images.forEach(function (im) { entries.push(im); }); });
     });
 
-    /* 不先攒成一个大对象再 JSON.stringify：那样 base64 会在内存里同时存在两三份，
-       几百 MB 的项目直接撞上 V8 的单字符串上限（RangeError: Invalid string length）。
-       改成一边读一边拼 JSON 片段，交给 Blob 去拼接（大了它会落盘）。 */
+    /* Deliberately not gathering everything into one object and calling JSON.stringify:
+       that keeps two or three copies of the base64 in memory at once, and a few hundred MB
+       of project runs straight into V8's single-string limit
+       (RangeError: Invalid string length).
+       Instead the JSON is assembled in fragments as images are read, and Blob does the
+       joining -- it spills to disk when large. */
     var parts = ['{"format":"fml-compare-project","version":1,"exportedAt":' +
       JSON.stringify(new Date().toISOString()) +
       ',"project":' + JSON.stringify(stripRuntime(project)) + ',"blobs":{'];
@@ -1442,7 +1491,7 @@
           });
         }).catch(function (e) {
           missing++;
-          console.error("[fml] 导出时读不出图片:", im.name, e);
+          console.error("[fml] could not read image while exporting:", im.name, e);
         });
       });
     });
@@ -1453,7 +1502,8 @@
       var a = el("a", { href: url,
         download: "fml_compare_project_" + localDateStamp() + ".json" });
       document.body.appendChild(a); a.click(); a.remove();
-      // 立刻 revoke 会让下载拿不到内容，但一直不 revoke 整份项目就常驻内存到关页面为止
+      // Revoking immediately would starve the download, but never revoking pins the whole
+      // project in memory until the page closes
       setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
       banner(missing
         ? t("msg.exportedPartial", { missing: missing, total: entries.length })
@@ -1461,14 +1511,16 @@
     }).catch(function (e) { banner(t("msg.exportFail", { e: errText(e) }), true); });
   }
 
-  /** 导出文件名用本地日期（toISOString 是 UTC，晚上导出会显示成第二天） */
+  /** Local date for the export file name: toISOString is UTC, so an evening export would
+      be stamped with tomorrow */
   function localDateStamp() {
     var d = new Date();
     function p(n) { return (n < 10 ? "0" : "") + n; }
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
   }
 
-  /** 下划线开头的都是运行期状态（_selected / _filters），不进导出文件 */
+  /** Anything starting with an underscore is runtime state (_selected / _filters) and
+      stays out of the export */
   function stripRuntime(p) {
     return JSON.parse(JSON.stringify(p, function (k, v) {
       return k.charAt(0) === "_" ? undefined : v;
@@ -1476,10 +1528,12 @@
   }
 
   /**
-   * 把外来数据补齐成渲染代码假定的形状。
-   * 少一个 models 数组就能让 reassignAll() 抛异常，而 reassignAll 在启动时跑在 bind()
-   * 之前——一旦这种数据存进了 IndexedDB，下次打开整页一个事件都不会绑上，
-   * 拖拽、导入、切换语言全部失灵且无法自救。所以来路不明的数据一律先过一遍这里。
+   * Bring foreign data up to the shape the rendering code assumes.
+   * A single missing models array is enough to make reassignAll() throw, and reassignAll
+   * used to run before bind() at startup -- once data like that reached IndexedDB, the
+   * next load wired up no event handlers at all: dropping, importing and switching
+   * language were all dead, with no way to recover from inside the page.
+   * So anything of unknown provenance goes through here first.
    */
   function normalizeProject(p) {
     if (!p || typeof p !== "object") p = {};
@@ -1511,8 +1565,10 @@
   }
 
   /**
-   * 把导入/文件夹清单里的项目落到当前存储模式（重新决定每张图存哪）。
-   * keepPaths：文件夹清单专用 —— 那些图片本来就躺在这个文件夹里，路径必须保留。
+   * Write an imported project, or one from a folder manifest, into the current storage
+   * mode, deciding afresh where each image lives.
+   * keepPaths is for folder manifests only: those images are already in that folder, so
+   * their paths must be preserved.
    */
   function applyImportedProject(payload, keepPaths) {
     var blobs = (payload && payload.blobs) || {};
@@ -1530,18 +1586,20 @@
         m.images.forEach(function (im) {
           var d = blobs[im.blobId];
           if (!d) {
-            // 导出文件里没带这张图（导出时就没读出来）。它的 path 是别人机器上的，
-            // 而落盘路径只由 case 名/模型名/槽位决定，留着的话会在当前绑定的文件夹里
-            // 命中一个同名但毫不相干的文件，把别的实验的图当成自己的显示出来。
+            // The export did not carry this image (it was unreadable at export time).
+            // Its path belongs to another machine, and since on-disk paths are decided
+            // purely by case name / model name / slot, keeping it would resolve to a
+            // same-named but entirely unrelated file in the currently bound folder --
+            // showing another experiment's plots as if they were this project's.
             if (!keepPaths) delete im.path;
             return;
           }
           chain = chain.then(function () {
-            delete im.path;                     // 按当前模式重新落盘
+            delete im.path;                     // re-persist according to the current mode
             return saveImageBlob(c, m, im, dataUrlToBlob(d))
               .then(function () { count++; })
-              .catch(function (e) {             // 单张图坏掉不影响整个项目导入
-                console.error("[fml] 恢复图片失败:", im.name, e);
+              .catch(function (e) {             // one bad image must not sink the whole import
+                console.error("[fml] could not restore image:", im.name, e);
               });
           });
         });
@@ -1553,7 +1611,8 @@
       reassignAll();
       return FMLStore.saveProject(project);
     }).then(function () {
-      // 被换掉的那个项目的图片再也引用不到了，顺手回收，免得浏览器配额被旧数据占死
+      // The replaced project's images are unreachable now; reclaim them so old data does
+      // not eat the browser quota
       return FMLStore.gc(project).catch(function () {});
     }).then(function () { return count; });
   }
@@ -1568,20 +1627,23 @@
         banner(t("msg.importBadFile"), true); return;
       }
       if (!confirm(t("confirm.import"))) return;
-      // 包一层 Promise：applyImportedProject 里同步抛出的异常也要能被下面的 catch 接住，
-      // 否则页面既不提示、又已经把 urlCache 清空了，看上去就是"点了导入什么都没发生"
+      // Wrapped in a promise so that an exception thrown synchronously inside
+      // applyImportedProject still reaches the catch below. Otherwise there is no message
+      // and urlCache has already been cleared, which looks like "I clicked import and
+      // nothing happened".
       Promise.resolve().then(function () {
         return applyImportedProject(payload, false);
       }).then(function (n) {
         banner(t("msg.importDone", { n: n }), false);
-        save();            // 文件夹模式下要把新项目写进磁盘清单，不然下次绑定会读到旧的
+        save();            // in folder mode the new project must reach the on-disk manifest,
+                         // or the next bind reads the old one
         render();
       }).catch(function (e) { banner(t("msg.importFail", { e: errText(e) }), true); });
     };
     r.readAsText(file);
   }
 
-  // ---------------- 存储位置 ----------------
+  // ---------------- Storage location ----------------
   function renderStorage() {
     var row = $("storageRow");
     var hint = $("storageHint");
@@ -1633,8 +1695,9 @@
       return FMLDir.requestPermission(h);
     }).then(function (perm) {
       if (perm !== "granted") { banner(t("msg.noWritePerm"), true); return; }
-      // 清单读不出来时绝不能当成"空文件夹"继续：后面的 save() 会用当前（可能是空的）
-      // 项目把它整个覆盖掉，磁盘上的图片就只剩一堆没有归属的文件名了
+      // An unreadable manifest must never be treated as an empty folder: the save() below
+      // would overwrite it wholesale with the current (possibly empty) project, leaving
+      // the images on disk as a pile of file names belonging to nothing.
       return FMLDir.readJSON(handle).catch(function (e) {
         banner(t("msg.manifestUnreadable", { manifest: FMLDir.MANIFEST, e: errText(e) }), true);
         return { __unreadable: true };
@@ -1667,16 +1730,18 @@
     }).then(function () {
       if (dirHandle) { save(); render(); }
     }).catch(function (e) {
-      if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) return;  // 用户取消
+      if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) return;  // user cancelled
       banner(t("msg.pickFail", { e: errText(e) }), true);
     });
   }
 
   /**
-   * 把所有图片搬到当前绑定的文件夹里。
-   * 来源有两种：浏览器 IndexedDB，以及"换个文件夹…"时的上一个文件夹 ——
-   * 后者不能跳过，否则换文件夹后这些图既不在新文件夹里、IndexedDB 里也早被删了，
-   * 清单却还记着旧路径，结果是整屏图片全部打不开且无从恢复。
+   * Move every image into the currently bound folder.
+   * There are two sources: the browser's IndexedDB, and -- when "Change folder…" is used
+   * -- the previous folder. The latter must not be skipped: after a change those images
+   * would be in neither the new folder nor IndexedDB (deleted long ago), while the
+   * manifest still points at the old paths. The result is a screen of broken images with
+   * no way back.
    */
   function migrateToFolder(prevHandle, prevReady) {
     var jobs = [], moved = 0, failed = 0;
@@ -1696,15 +1761,15 @@
             }
             return read.then(function (blob) {
               if (!blob) { failed++; return; }
-              delete im.path;                    // 让 saveImageBlob 按新文件夹重算路径
+              delete im.path;                    // make saveImageBlob recompute the path for the new folder
               return saveImageBlob(c, m, im, blob).then(function () {
                 moved++;
-                // 原来在浏览器里的才删；原来在旧文件夹里的文件留着不动
+                // Only browser copies get deleted; files in the old folder are left alone
                 if (!oldPath) return FMLStore.deleteBlob(im.blobId).catch(function () {});
               }).catch(function (e) {
-                if (oldPath) im.path = oldPath;  // 写失败就退回旧路径，别把引用弄丢
+                if (oldPath) im.path = oldPath;  // on a failed write, fall back so the reference is not lost
                 failed++;
-                console.error("[fml] 迁移图片失败:", im.name, e);
+                console.error("[fml] could not migrate image:", im.name, e);
               });
             });
           });
@@ -1714,10 +1779,12 @@
     return serialChain(jobs).then(function () { return { moved: moved, failed: failed }; });
   }
 
-  /** 本地文件夹 -> 浏览器存储（磁盘上的文件保留不删） */
+  /** Local folder -> browser storage (files on disk are kept) */
   function unbindFolder() {
-    // 没拿到权限时一张图都读不回来，但按钮就摆在"需要重新授权"那一行旁边。
-    // 照常执行的话句柄会被销毁、"恢复访问"按钮跟着消失，只能手动重新选一次同一个文件夹。
+    // Without permission not one image can be read back, yet the button sits right next
+    // to the "needs re-authorisation" row. Going ahead anyway destroys the handle and
+    // takes the "Restore access" button with it, leaving no way out but re-picking the
+    // very same folder by hand.
     var canRead = folderReady();
     if (!confirm(canRead ? t("confirm.unbind") : t("confirm.unbindNoAccess"))) return;
 
@@ -1760,8 +1827,9 @@
     }).catch(function (e) { banner(t("msg.authFail", { e: errText(e) }), true); });
   }
 
-  // ---------------- 渲染 ----------------
-  /** 把 src 整个并进 dst：同名（去扩展名后）的输入数据合成一份，模型跟着走 */
+  // ---------------- Rendering ----------------
+  /** Merge src wholesale into dst: input data with the same stem is combined, and the
+      models follow */
   function mergeCases(src, dst) {
     if (!src || !dst || src.id === dst.id) return;
     src.inputs.forEach(function (inp) {
@@ -1796,7 +1864,7 @@
             if (!n) return;
             n = n.trim();
             if (!n || n === c.name) return;
-            // 改成和已有 case 同名 = 想把它们合并，而不是造出两个重名的
+            // Renaming to an existing case name means merge, not two cases with one name
             var other = project.cases.filter(function (x) { return x.id !== c.id && x.name === n; })[0];
             if (other) {
               if (confirm(t("confirm.mergeCase", { from: c.name, to: n }))) mergeCases(c, other);
@@ -1844,10 +1912,11 @@
   var renderSeq = 0;
 
   function render() {
-    // ensureUrls 在文件夹模式下要真的去磁盘读几十上百个文件，慢的时候用户早就点去
-    // 别的 case 了。没有这个序号的话，先发起的那次渲染会把后发起的覆盖掉：
-    // 页面画着 A，标签页却高亮 B，而 A 里那些按钮的闭包改的是 A —— 删除、打星
-    // 全落在"不是当前显示"的 case 上。
+    // In folder mode ensureUrls really does read dozens or hundreds of files off disk,
+    // and when that is slow the user has long since clicked another case. Without this
+    // sequence number the render started first overwrites the one started later: the page
+    // shows A while the tab strip highlights B, and the handlers inside A's DOM close over
+    // A -- so deleting or starring acts on a case that is not the one on screen.
     var seq = ++renderSeq;
     renderStorage();
     renderTabs();
@@ -1864,15 +1933,16 @@
     });
   }
 
-  // ---------------- 事件绑定 ----------------
-  /* 拖进来的是文件夹时，dataTransfer.files 里的"目录"是空壳，
-     必须用 webkitGetAsEntry() 递归把里面的文件读出来。 */
+  // ---------------- Event wiring ----------------
+  /* When a folder is dropped, the "directory" in dataTransfer.files is an empty shell;
+     webkitGetAsEntry() is the only way to walk it and read the files inside. */
   function readDirEntries(reader) {
     var all = [];
     return new Promise(function (res, rej) {
       function next() {
         reader.readEntries(function (batch) {
-          if (!batch.length) { res(all); return; }   // readEntries 一次最多 100 条，要读到空为止
+          if (!batch.length) { res(all); return; }   // readEntries returns at most 100 at a
+                                                     // time; keep going until it returns none
           all = all.concat(Array.prototype.slice.call(batch));
           next();
         }, rej);
@@ -1923,15 +1993,15 @@
         if (entries.length) handler(entries);
         else banner("", false);
       }).catch(function (err) {
-        console.error("[fml] 读取拖入的文件夹失败:", err);
+        console.error("[fml] could not read the dropped folder:", err);
         banner(t("msg.importFail", { e: errText(err) }), true);
       });
     });
   }
 
   function bind() {
-    /* 拖到上传框以外的地方时，浏览器默认会直接打开那个文件，把整个页面顶掉
-       （未保存的提示条、正在看的对比视图全没了）。统一挡掉。 */
+    /* Dropped anywhere outside a drop zone, the browser would navigate to the file and
+       replace the whole page -- banner, comparison view and all. Block it globally. */
     document.addEventListener("dragover", function (e) { e.preventDefault(); });
     document.addEventListener("drop", function (e) { e.preventDefault(); });
 
@@ -1994,10 +2064,11 @@
       try { localStorage.setItem("fml_theme", next); } catch (e) {}
     });
 
-    // 一键中英切换：静态文案 + 动态渲染的内容一起刷新
+    // Language toggle: refresh the static copy and everything rendered dynamically
     $("langBtn").addEventListener("click", function () {
       I18N.setLang(I18N.getLang() === "zh" ? "en" : "zh");
-      banner("", false);        // 之前那条提示是旧语言写的，直接清掉免得中英混排
+      banner("", false);        // the old message is in the previous language; clear it
+                                // rather than mixing the two
       applyI18n();
       render();
     });
@@ -2014,7 +2085,7 @@
     });
   }
 
-  /** 刷新所有静态文案（含随主题变化的按钮、页脚的占用大小） */
+  /** Refresh all static copy, including the theme button and the footer's usage figure */
   function applyI18n() {
     I18N.applyStatic();
     var dark = document.documentElement.getAttribute("data-theme") === "dark";
@@ -2023,7 +2094,7 @@
     if (project) updateStorageInfo();
   }
 
-  // ---------------- 启动 ----------------
+  // ---------------- Startup ----------------
   try {
     var savedTheme = localStorage.getItem("fml_theme");
     if (savedTheme) {
@@ -2034,7 +2105,8 @@
   applyI18n();
 
   FMLStore.init().then(function () {
-    // 恢复上次绑定的文件夹（句柄本身能存进 IndexedDB，但权限要用户再点一次）
+    // Restore the previously bound folder. The handle itself survives in IndexedDB, but
+    // the permission needs one more click from the user.
     return FMLStore.kvGet("dirHandle").then(function (h) {
       if (!h) return;
       dirHandle = h;
@@ -2046,17 +2118,18 @@
   }).then(function (p) {
     project = normalizeProject(p || { version: 1, activeCaseId: null, cases: [] });
     if (!project.version) project.version = 1;
-    // 先绑事件再渲染：渲染路径上任何一个异常都不该让页面变成"按钮全不响应"的死页
+    // Wire events before rendering: no exception on the render path should be able to
+    // leave the page dead with every button unresponsive
     bind();
     applyI18n();
     FMLStore.persisted().then(function (persistedNow) {
-      persistedState = persistedNow;   // 只查询、不申请，避免一打开就弹权限框
+      persistedState = persistedNow;   // query only, never request -- no permission prompt on load
       updateStorageInfo();
     }).catch(function () {});
     try {
-      reassignAll();   // 老数据没有 inputId，这里补上归类
+      reassignAll();   // older data has no inputId; fill it in here
     } catch (e) {
-      console.error("[fml] 归类失败:", e);
+      console.error("[fml] re-filing failed:", e);
     }
     render();
     updateStorageInfo();

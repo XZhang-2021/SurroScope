@@ -1,4 +1,5 @@
-/* 中英双语。t("key", {var: 1}) 取文案；页面上的静态文字用 data-i18n 标注 */
+/* English / Chinese strings. t("key", {var: 1}) looks one up;
+   static text in the page is tagged with data-i18n. */
 (function (global) {
   "use strict";
 
@@ -414,7 +415,7 @@
     setLang(nav.indexOf("zh") === 0 ? "zh" : "en");
   }
 
-  /** 刷新页面上所有 data-i18n 标注的静态文字 */
+  /** Refresh every piece of static text tagged with data-i18n */
   function applyStatic(root) {
     var scope = root || document;
     Array.prototype.forEach.call(scope.querySelectorAll("[data-i18n]"), function (n) {

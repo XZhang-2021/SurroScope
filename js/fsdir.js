@@ -1,12 +1,13 @@
-/* File System Access 封装：把图片直接写进用户自选的本地文件夹
+/* File System Access wrapper: writes images straight into a folder the user picks
  *
- * 目录结构：
- *   <你选的文件夹>/
- *     fml_compare_project.json      ← 元数据（换电脑时靠它恢复）
- *     <case 名>/<模型文件夹名>/traj-xxx.png
- *                              error-xxx.png
+ * Layout:
+ *   <the folder you picked>/
+ *     fml_compare_project.json      <- metadata; this is what restores the project elsewhere
+ *     <case name>/<model folder name>/traj.png
+ *                                     error.png
  *
- * 注意：浏览器重启后文件夹权限需要用户再点一次「恢复访问」（浏览器安全限制）。
+ * Note: after a browser restart the user must click "Restore access" once before the
+ * folder can be read again (browser security rule).
  */
 (function (global) {
   "use strict";
@@ -31,7 +32,7 @@
     return handle.requestPermission({ mode: "readwrite" });
   }
 
-  /** Windows 文件名非法字符 -> _ */
+  /** Characters Windows forbids in file names -> _ */
   function safeName(s) {
     return String(s === null || s === undefined ? "" : s)
       .replace(/[\\/:*?"<>|]/g, "_")
@@ -73,7 +74,7 @@
     var sp = splitPath(path);
     return dirFor(root, sp.dirs, false)
       .then(function (d) { return d.removeEntry(sp.name); })
-      .catch(function () { /* 文件已不在就算了 */ });
+      .catch(function () { /* already gone is fine */ });
   }
 
   function writeJSON(root, obj) {
@@ -81,9 +82,10 @@
     return writeFile(root, MANIFEST, blob);
   }
 
-  /* 只有"文件夹里本来就没有清单"才返回 null。
-     读得到但读不出来（云盘占位文件没同步下来、同步到一半被截断、JSON 坏了）必须往上抛：
-     调用方要是把这两种情况混为一谈，就会把一份好好的清单当成空文件夹覆盖掉。 */
+  /* Return null only when the folder genuinely has no manifest.
+     Present but unreadable -- a cloud placeholder that never synced, a truncated partial
+     sync, broken JSON -- has to propagate: a caller that conflates the two would take a
+     perfectly good manifest for an empty folder and overwrite it. */
   function readJSON(root) {
     return readFile(root, MANIFEST)
       .catch(function (e) {
@@ -96,9 +98,11 @@
       });
   }
 
-  /* Windows 单条路径上限 260 字符，而这些模型名动辄 120+ 字符，
-     再拼上同样长的原始文件名就必然超限（浏览器会报 NotFoundError）。
-     所以：目录名超长就截断 + 加短哈希保证唯一，文件名只用槽位名（原名另存在元数据里）。 */
+  /* Windows caps a full path at 260 characters, while these model names routinely run
+     past 120; appending an equally long original file name is guaranteed to overflow,
+     and the browser then reports NotFoundError.
+     So: over-long directory segments are truncated and given a short hash to stay unique,
+     and the file name is just the slot name (the original lives in the metadata). */
   var MAX_SEG = 100;
 
   function hash5(s) {
@@ -118,7 +122,7 @@
     return m ? m[0].toLowerCase() : "";
   }
 
-  /** 为一张图片生成落盘路径 */
+  /** Build the on-disk path for one image */
   function imagePath(caseName, modelFolder, slot, fileName, unique) {
     var base = safeName(slot) + (unique ? "-" + safeName(unique) : "") + extOf(fileName);
     return shortSeg(caseName) + "/" + shortSeg(modelFolder) + "/" + base;

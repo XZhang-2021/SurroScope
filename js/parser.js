@@ -1,15 +1,16 @@
-/* 文件名 / 文件夹名解析器
+/* Parser for file and folder names
  *
- * 例：
+ * Example:
  *   2phase_cenX6464_20k_heter_mem20_inj1_rec10_logOn_randiSameNumPerTraj0.8_ConstantInj10_0902.mat
  *   -> prefix: "2phase_cenX6464"
  *      params: size 20k / medium heter / mem 20 / inj 1 / rec 10 / log On /
  *              sample 0.8 / injMode Constant 10 / date 09-02
  *
  *   2phase_cenX6464_20k_heter_mem40_inj1_rec10_logOn_randiSameNumPerTraj0.8_ConstantInj10_0902_L3N10_GPUResident_BS32768_NoStop
- *   -> 以上 + arch Layer3 Node10 / bs 32768 / flags GPUResident, NoStop
+ *   -> the above + arch Layer3 Node10 / bs 32768 / flags GPUResident, NoStop
  *
- * 前缀（Cappa_Tmax、2phase_cenX6464 …）= 第一个能被识别的参数 token 之前的所有 token。
+ * The prefix (Cappa_Tmax, 2phase_cenX6464 …) is every token before the first token
+ * that parses as a parameter.
  */
 (function (global) {
   "use strict";
@@ -17,15 +18,17 @@
   function dec(s) { return String(s).replace(/p(?=\d)/g, "."); }
 
   /**
-   * 去掉文件扩展名。不限定 .mat —— 别人可能用 .h5 / .npz / .pkl / .pt / .csv。
-   * 但扩展名必须以字母开头：否则 "...randiSameNumPerTraj0.8" 结尾的 ".8"
-   * 会被当成扩展名剥掉，把采样参数弄坏。
+   * Strip the file extension. Not limited to .mat -- people also use
+   * .h5 / .npz / .pkl / .pt / .csv.
+   * The extension must start with a letter though: otherwise the ".8" ending
+   * "...randiSameNumPerTraj0.8" gets stripped as an extension, breaking the sampling parameter.
    */
   function stripExt(s) {
     return String(s === null || s === undefined ? "" : s).replace(/\.[a-z][a-z0-9]{0,7}$/i, "");
   }
 
-  // key: 内部键（同时是 i18n 键 param.<key>）；model: 是否属于"训练超参数"（用于和输入数据比对时忽略）
+  // key: the internal key, which doubles as the i18n key param.<key>
+  // model: true for training hyperparameters, which are ignored when comparing with input data
   var PATTERNS = [
     { key: "size",    re: /^N?(\d+(?:p\d+)?)k$/i,        fmt: function (m) { return dec(m[1]) + "k"; } },
     { key: "medium",  re: /^(heter|homo)$/i,             fmt: function (m) { return m[1]; } },
@@ -41,7 +44,7 @@
     { key: "date",    re: /^(\d{4})$/,
       fmt: function (m) { return m[1].slice(0, 2) + "-" + m[1].slice(2); } },
 
-    // ---- 训练超参数（只出现在模型文件夹名里）----
+    // ---- Training hyperparameters (only ever appear in model folder names) ----
     { key: "act",     re: /^(relu|tanh|sigmoid|gelu|elu)$/i, model: true, fmt: function (m) { return m[1]; } },
     { key: "arch",    re: /^L(\d+)N(\d+)$/i, model: true,
       fmt: function (m) { return "Layer" + m[1] + " Node" + m[2]; } },
@@ -65,8 +68,8 @@
   }
 
   /**
-   * 解析一个名字（已去掉扩展名）。
-   * 返回 { raw, prefix, params:[{key,value,raw,model}], flags:[...], byKey:{} }
+   * Parse a name (extension already stripped).
+   * Returns { raw, prefix, params:[{key,value,raw,model}], flags:[...], byKey:{} }
    */
   function parseName(rawName) {
     var name = stripExt(rawName);
@@ -76,10 +79,11 @@
     for (var i = 0; i < tokens.length; i++) {
       if (matchToken(tokens[i])) { firstIdx = i; break; }
     }
-    // 一个参数都识别不出来时整串都当前缀。
-    // 第一个 token 就是参数（20k_heter_mem20_…）时前缀为空 —— 不能硬留一个 token，
-    // 那样 20k / 40k 会被当成两个不同的前缀（其实是同一个问题的两种样本量），
-    // 而且被留下的那个 token 还会从参数表里消失，样本量筛选跟着失效。
+    // Nothing recognised at all -> the whole string is the prefix.
+    // When the very first token is already a parameter (20k_heter_mem20_…) the prefix is
+    // empty, and we must not force one token to stay: that would turn 20k / 40k into two
+    // different prefixes (they are two sample sizes of the same problem), and the token
+    // kept as the prefix would vanish from the parameter table, breaking its filter.
     var splitAt = firstIdx < 0 ? tokens.length : firstIdx;
     var prefix = tokens.slice(0, splitAt).join("_");
 
@@ -104,14 +108,15 @@
   }
 
   /**
-   * 把模型文件夹名拆成「输入数据名 + 超参数后缀」。
+   * Split a model folder name into "input data name + hyperparameter suffix".
    *   2phase_cenX6464_20k_..._ConstantInj10_0902_L3N10
-   *     -> dataset: 2phase_cenX6464_20k_..._ConstantInj10_0902   （= .mat 的名字）
+   *     -> dataset: 2phase_cenX6464_20k_..._ConstantInj10_0902   (= the .mat name)
    *        suffix : L3N10
    *
-   * 切点：第一个"训练超参数" token（L3N10 / BS… / Layer… / seed… …）之前。
-   * 名字里没有超参数 token 时，退而切在最后一个日期 token 之后，
-   * 这样尾部的杂项标记（GPUResident、NoStop …）也不会算进数据集名。
+   * The cut goes just before the first training-hyperparameter token
+   * (L3N10 / BS… / Layer… / seed… …). When the name has none, it falls back to just after
+   * the last date token, so trailing odds and ends (GPUResident, NoStop …) stay out of
+   * the dataset name.
    */
   function splitModelName(rawName) {
     var name = stripExt(rawName);
@@ -135,7 +140,8 @@
     };
   }
 
-  /** 数据集签名：忽略训练超参数和日期，用于把模型文件夹对上输入数据 */
+  /** Dataset signature: ignores training hyperparameters and the date. Used to match a
+      model folder to its input data. */
   function datasetSignature(parsed) {
     var keys = Object.keys(parsed.byKey).filter(function (k) { return k !== "date" && !isModelKey(k); });
     keys.sort();
@@ -150,8 +156,9 @@
   }
 
   /**
-   * 比较模型和输入数据的参数差异（忽略日期与训练超参数）。
-   * 返回 [{key, modelValue, inputValue}]
+   * Diff a model's parameters against its input data's (date and training
+   * hyperparameters excluded).
+   * Returns [{key, modelValue, inputValue}]
    */
   function diffParams(modelParsed, inputParsed) {
     var out = [];
