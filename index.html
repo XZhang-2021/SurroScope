@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SurroScope · 代理模型结果对比看板</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body data-i18n-doctitle="ui.title">
+<div class="app">
+
+  <header class="app-header">
+    <div>
+      <h1 data-i18n="ui.title">SurroScope · 代理模型结果对比看板</h1>
+      <p class="sub" data-i18n="ui.subtitle">上传输入数据 / 模型文件夹只提取名字；结果图片会保存下来用于并排对比。</p>
+    </div>
+    <div class="header-actions">
+      <button id="langBtn" class="btn" data-i18n="ui.lang" data-i18n-title="ui.langTitle" title="切换语言 / Switch language">中文 / English</button>
+      <button id="exportBtn" class="btn" data-i18n="ui.export">导出项目</button>
+      <button id="importBtn" class="btn" data-i18n="ui.import">导入项目</button>
+      <input type="file" id="importInput" accept=".json" hidden>
+      <button id="themeBtn" class="btn">深色</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <!-- ============ 存储位置 ============ -->
+  <section class="card storage-card">
+    <div class="card-head">
+      <h2 data-i18n="sec.storage">存储位置</h2>
+      <span class="hint" id="storageHint"></span>
+    </div>
+    <div id="storageRow" class="storage-row"></div>
+  </section>
+
+  <!-- ============ Case 选择 ============ -->
+  <section class="card">
+    <div class="card-head">
+      <h2 data-i18n="sec.case">工况 Case</h2>
+      <div class="card-head-actions">
+        <button id="mergeCaseBtn" class="btn btn-sm" data-i18n="btn.mergeCase" hidden>合并 case…</button>
+        <button id="addCaseBtn" class="btn btn-sm" data-i18n="btn.newCase">+ 新建 case</button>
+      </div>
+    </div>
+    <div id="caseTabs" class="case-tabs"></div>
+  </section>
+
+  <div id="caseBody" hidden>
+
+    <!-- ============ 输入数据 → 模型（两层结构） ============ -->
+    <section class="card">
+      <div class="card-head">
+        <h2 data-i18n="sec.data">输入数据 / 模型结果</h2>
+        <span class="hint" data-i18n="hint.data">模型会按文件名里的参数自动挂到对应的输入数据下面</span>
+        <div class="card-head-actions">
+          <button id="collapseAllBtn" class="btn btn-sm" data-i18n="btn.collapseAll">全部折叠</button>
+          <button id="expandAllBtn" class="btn btn-sm" data-i18n="btn.expandAll">全部展开</button>
+        </div>
+      </div>
+
+      <div class="upload-row">
+        <label class="dropzone" id="inputDrop">
+          <input type="file" id="inputFile" multiple hidden>
+          <div class="dz-title" data-i18n="dz.input.title">点击选择输入数据文件，或拖到这里</div>
+          <div class="dz-sub" data-i18n="dz.input.sub">任意格式（.mat / .h5 / .npz / .csv …），只取文件名；可一次选多个</div>
+        </label>
+
+        <label class="dropzone" id="modelDrop">
+          <input type="file" id="modelFolder" webkitdirectory directory multiple hidden>
+          <div class="dz-title" data-i18n="dz.model.title">点击选择模型文件夹</div>
+          <div class="dz-sub" data-i18n="dz.model.sub">可一次拖多个文件夹，或直接拖父文件夹；认得出的超参数会自动打标签</div>
+        </label>
+
+        <label class="dropzone dz-accent" id="resultDrop">
+          <input type="file" id="resultFolder" webkitdirectory directory multiple hidden>
+          <div class="dz-title" data-i18n="dz.result.title">点击选择结果文件夹（自动推导输入数据）</div>
+          <div class="dz-sub" data-i18n="dz.result.sub">文件夹名 = 模型名，去掉末尾的超参数后缀 = 输入数据名；可一次拖多个，或直接拖父文件夹</div>
+        </label>
+      </div>
+
+      <div id="dataTree"></div>
+    </section>
+
+    <!-- ============ 对比 ============ -->
+    <section class="card">
+      <div class="card-head">
+        <h2 data-i18n="sec.compare">对比视图</h2>
+        <div class="card-head-actions">
+          <label class="inline-field">
+            <span data-i18n="cmp.layout">排列</span>
+            <select id="cmpLayout">
+              <option value="byModel" data-i18n="cmp.layout.byModel">每个模型一行</option>
+              <option value="byKind" data-i18n="cmp.layout.byKind">按图片类型分组</option>
+            </select>
+          </label>
+          <label class="inline-field">
+            <span data-i18n="cmp.cols">每行</span>
+            <select id="cmpCols">
+              <option value="0" data-i18n="cmp.cols.auto">自动</option>
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div id="cmpParamFilter" class="param-filter"></div>
+      <div id="cmpFilter" class="cmp-filter"></div>
+      <div id="cmpArea"></div>
+    </section>
+
+  </div>
+
+  <div id="emptyState" class="empty-state" data-i18n="empty.noCase">
+    还没有 case。直接把结果文件夹拖进来就会自动建，也可以点上面的「+ 新建 case」。
+  </div>
+
+  <footer class="foot">
+    <span data-i18n="foot.note">数据保存在本地。换电脑或清理浏览器数据前，请先「导出项目」或绑定本地文件夹。</span>
+    <span id="storageInfo"></span>
+  </footer>
+</div>
+
+<!-- 多选项确认框（confirm 只有两个按钮，不够用） -->
+<div id="askBox" class="askbox" hidden>
+  <div class="askbox-panel">
+    <div id="askTitle" class="askbox-title"></div>
+    <div id="askBody" class="askbox-body"></div>
+    <div id="askActions" class="askbox-actions"></div>
+  </div>
+</div>
+
+<!-- 图片放大 -->
+<div id="lightbox" class="lightbox" hidden>
+  <div class="lb-bar">
+    <span id="lbTitle" class="lb-title"></span>
+    <span class="lb-spacer"></span>
+    <button id="lbPrev" class="btn btn-sm" data-i18n="lb.prev">← 上一张</button>
+    <button id="lbNext" class="btn btn-sm" data-i18n="lb.next">下一张 →</button>
+    <button id="lbClose" class="btn btn-sm" data-i18n="lb.close">关闭 ✕</button>
+  </div>
+  <div id="lbStage" class="lb-stage"></div>
+</div>
+
+<script src="js/i18n.js"></script>
+<script src="js/parser.js"></script>
+<script src="js/store.js"></script>
+<script src="js/fsdir.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

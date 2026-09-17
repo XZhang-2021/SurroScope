@@ -1,0 +1,15 @@
+# 从看板「导出项目」生成的文件（内嵌 base64 图片，体积很大）
+fml_compare_project*.json
+
+# 截图 / 临时文件
+screenshot*.png
+*.tmp
+
+# 操作系统 / 编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 本机的 Claude Code 设置
+.claude/
