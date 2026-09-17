@@ -135,9 +135,11 @@ in two steps instead:
 Input data created by the quick-start route is marked **inferred**. Uploading the real `.mat` later
 merges into the same entry and clears the mark.
 
-Both the middle and the blue box accept batch drops (many folders, or one parent folder). A folder
-counts as a model folder only if its name has more than 2 non-date parameters, so a container like
-`report_0909` is never mistaken for a model — it is expanded instead.
+Both the middle and the blue box accept batch drops (many folders, or one parent folder). A dropped
+folder is treated as one model when the plots sit directly inside it, and as a container when its
+subfolders are the model folders — so `report_0909` is expanded, and a model folder with
+`checkpoints/` or `logs/` beside its plots is not. Intermediate directories (`runs/2026-09/<model>/`)
+are walked through.
 
 > File formats other than `.mat` work fine — `.h5` / `.npz` / `.pkl` / `.csv` — since only the name is read.
 
@@ -164,8 +166,10 @@ data of every case. Once set manually, automatic filing no longer overrides it.
 
 **How images are classified**: a file name containing `traj`/`轨迹`/`compare`/`pred` → trajectory plot;
 `err`/`error`/`误差`/`hist` → error plot; everything else → "Other". Only the **distinguishing
-fragment** is inspected (a repeated folder-name prefix is stripped first), so `<model name>_error.png`
-is not dragged into the trajectory bucket by a `randiSameNumPerTraj` inside the model name.
+fragment** is inspected — the repeated folder-name prefix is stripped first, and anything still
+matching a token of the folder name is removed before the keywords are applied. So
+`<model name>_error.png` is filed as an error plot even when the model name itself contains
+`randiSameNumPerTraj` or `pred`.
 You can also click or drag into any image slot to upload, replace or delete manually.
 
 ## The comparison view in detail
@@ -209,6 +213,7 @@ to a generic rule and still works:
 | | Recognised naming | Unrecognised naming |
 |---|---|---|
 | How cases are split | The part before the first parameter token | **The first token of the name** (`airfoil_gp_rbf` → `airfoil`) |
+| If there is no such part | Names starting with a parameter (`20k_heter_…`) all land in one case named `default` — rename it or merge it | — |
 | Input data | Matched exactly by parameter signature | Inferred from the model folder name; identical names merge |
 | Parameter labels | Recognised individually and filterable | Shown verbatim as dashed tags; comparison is unaffected |
 
@@ -316,10 +321,13 @@ your folder/
   fml_compare_project.json                ← metadata manifest
   2phase_cenX6464/                        ← case name
     2phase_cenX6464_..._L3N10_BS32768/    ← model folder name
-      traj-traj_compare.png
-      error-error_hist.png
-      other-a1b2-extra.png
+      traj.png                            ← one file per slot, so re-importing
+      error.png                             the same folder just overwrites it
+      other-a1b2.png                      ← "Other" holds many, hence the suffix
 ```
+
+Very long case or model names are shortened with a short hash so the path stays within
+the Windows limit; the original names live in the manifest.
 
 - Only the images are on disk; metadata (cases / models / parameters) still lives in the browser (a few
   dozen KB) and is mirrored to `fml_compare_project.json` for recovery.

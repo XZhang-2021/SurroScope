@@ -81,11 +81,19 @@
     return writeFile(root, MANIFEST, blob);
   }
 
+  /* 只有"文件夹里本来就没有清单"才返回 null。
+     读得到但读不出来（云盘占位文件没同步下来、同步到一半被截断、JSON 坏了）必须往上抛：
+     调用方要是把这两种情况混为一谈，就会把一份好好的清单当成空文件夹覆盖掉。 */
   function readJSON(root) {
     return readFile(root, MANIFEST)
-      .then(function (f) { return f.text(); })
-      .then(function (t) { return JSON.parse(t); })
-      .catch(function () { return null; });
+      .catch(function (e) {
+        if (e && e.name === "NotFoundError") return null;
+        throw e;
+      })
+      .then(function (f) {
+        if (!f) return null;
+        return f.text().then(function (txt) { return JSON.parse(txt); });
+      });
   }
 
   /* Windows 单条路径上限 260 字符，而这些模型名动辄 120+ 字符，

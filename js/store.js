@@ -32,6 +32,7 @@
   }
 
   function tx(store, mode) {
+    if (!db) throw new Error("IndexedDB 尚未初始化");
     return db.transaction(store, mode).objectStore(store);
   }
 
@@ -42,26 +43,36 @@
     });
   }
 
-  function loadProject() { return wrap(tx(KV, "readonly").get("project")); }
+  /* db.transaction() 是同步抛异常的（数据库没开、被关掉、配额爆了都会抛）。
+     直接 wrap(tx(...).put(...)) 的话这个异常会穿过调用方的 .catch()，
+     结果就是"保存失败了但界面上什么都没发生"。统一在这里转成 rejected promise。 */
+  function run(store, mode, fn) {
+    try { return wrap(fn(tx(store, mode))); }
+    catch (e) { return Promise.reject(e); }
+  }
+
+  function loadProject() { return run(KV, "readonly", function (s) { return s.get("project"); }); }
 
   function saveProject(project) {
-    return wrap(tx(KV, "readwrite").put(project, "project"));
+    return run(KV, "readwrite", function (s) { return s.put(project, "project"); });
   }
 
   /* 通用键值：用来存 FileSystemDirectoryHandle（可被结构化克隆，能直接存进 IndexedDB） */
-  function kvGet(key) { return wrap(tx(KV, "readonly").get(key)); }
-  function kvSet(key, value) { return wrap(tx(KV, "readwrite").put(value, key)); }
-  function kvDel(key) { return wrap(tx(KV, "readwrite").delete(key)); }
+  function kvGet(key) { return run(KV, "readonly", function (s) { return s.get(key); }); }
+  function kvSet(key, value) { return run(KV, "readwrite", function (s) { return s.put(value, key); }); }
+  function kvDel(key) { return run(KV, "readwrite", function (s) { return s.delete(key); }); }
 
   function putBlob(id, blob, meta) {
-    return wrap(tx(BLOBS, "readwrite").put({ blob: blob, meta: meta || {} }, id));
+    return run(BLOBS, "readwrite", function (s) {
+      return s.put({ blob: blob, meta: meta || {} }, id);
+    });
   }
 
-  function getBlob(id) { return wrap(tx(BLOBS, "readonly").get(id)); }
+  function getBlob(id) { return run(BLOBS, "readonly", function (s) { return s.get(id); }); }
 
-  function deleteBlob(id) { return wrap(tx(BLOBS, "readwrite").delete(id)); }
+  function deleteBlob(id) { return run(BLOBS, "readwrite", function (s) { return s.delete(id); }); }
 
-  function allBlobKeys() { return wrap(tx(BLOBS, "readonly").getAllKeys()); }
+  function allBlobKeys() { return run(BLOBS, "readonly", function (s) { return s.getAllKeys(); }); }
 
   /** 删除项目里已经引用不到的图片，避免占空间 */
   function gc(project) {

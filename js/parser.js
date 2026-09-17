@@ -76,8 +76,11 @@
     for (var i = 0; i < tokens.length; i++) {
       if (matchToken(tokens[i])) { firstIdx = i; break; }
     }
-    // 前缀至少保留一个 token；一个都识别不出来时整串都当前缀
-    var splitAt = firstIdx < 0 ? tokens.length : Math.max(1, firstIdx);
+    // 一个参数都识别不出来时整串都当前缀。
+    // 第一个 token 就是参数（20k_heter_mem20_…）时前缀为空 —— 不能硬留一个 token，
+    // 那样 20k / 40k 会被当成两个不同的前缀（其实是同一个问题的两种样本量），
+    // 而且被留下的那个 token 还会从参数表里消失，样本量筛选跟着失效。
+    var splitAt = firstIdx < 0 ? tokens.length : firstIdx;
     var prefix = tokens.slice(0, splitAt).join("_");
 
     var params = [];
