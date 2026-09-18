@@ -30,6 +30,12 @@
       "sec.model": "模型结果",
       "sec.compare": "对比视图",
 
+      "nav.data": "数据 / 模型",
+      "nav.compare": "对比",
+      "nav.jump": "跳到数据…",
+      "nav.jumpTitle": "跳到某份输入数据的分组",
+      "nav.top": "↑ 顶部",
+
       "btn.collapseAll": "全部折叠",
       "btn.expandAll": "全部展开",
       "model.toggleImages": "折叠 / 展开这个模型的图片",
@@ -230,6 +236,12 @@
       "sec.input": "Input data",
       "sec.model": "Model results",
       "sec.compare": "Comparison",
+
+      "nav.data": "Data / models",
+      "nav.compare": "Comparison",
+      "nav.jump": "Jump to dataset…",
+      "nav.jumpTitle": "Jump to one input dataset's group",
+      "nav.top": "↑ Top",
 
       "btn.collapseAll": "Collapse all",
       "btn.expandAll": "Expand all",

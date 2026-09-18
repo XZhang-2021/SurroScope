@@ -174,7 +174,7 @@ html, body {
 /* Mark picker: shows whichever mark is set, instead of three buttons */
 .mark-select {
   font: inherit; font-size: 12px; line-height: 1;
-  flex: none; width: 92px;
+  flex: none; width: 108px;   /* fits the longest option, "— unmarked" */
   padding: 3px 4px; margin-top: -1px;
   background: var(--inset-2); color: var(--ink-2);
   border: 1px solid transparent; border-radius: 6px;
@@ -189,6 +189,41 @@ html, body {
 .model-card.mark-down { border-color: var(--down-edge); background: var(--down-wash); }
 .chip-select.mark-up { background: var(--up-wash); color: var(--up-ink); }
 .chip-select.mark-down { background: var(--down-wash); color: var(--down-ink); }
+
+/* ---------------- Sticky section nav ---------------- */
+.navbar {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  margin: 0 0 16px; padding: 7px 9px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+}
+.nav-item {
+  font: inherit; font-size: 12.5px; font-weight: 500;
+  background: transparent; color: var(--ink-2);
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  padding: 4px 11px; cursor: pointer; white-space: nowrap;
+  transition: background .13s, color .13s;
+}
+.nav-item:hover { background: var(--accent-wash); color: var(--accent-ink); }
+.nav-item.on { background: var(--accent-wash); color: var(--accent-ink); font-weight: 600; }
+.nav-item.off { color: var(--ink-3); cursor: default; }
+.nav-item.off:hover { background: transparent; color: var(--ink-3); }
+.nav-jump {
+  font: inherit; font-size: 12px;
+  max-width: 220px; margin-left: 4px;
+  padding: 4px 6px;
+  background: var(--inset-2); color: var(--ink-2);
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.nav-jump:hover { border-color: var(--line); }
+.nav-top { margin-left: auto; }
+
+/* Keep the sticky bar from covering the heading it just jumped to */
+.card[id], .data-group[id] { scroll-margin-top: 62px; }
 
 /* ---------------- Banner ---------------- */
 .banner {

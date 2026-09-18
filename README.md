@@ -78,6 +78,16 @@ Scroll to **Comparison**, tick the models you want.
 - Switch plot types on and off, or filter by `Samples` / `mem` / `inj` / `rec` / … to narrow the set.
 - Click any image to enlarge; `←` `→` to page, `Esc` to close.
 
+A **sticky nav bar** sits at the top of the page and follows you down it:
+
+```
+Storage location │ Cases │ Data / models │ Comparison │ Jump to dataset… ▾ │ ↑ Top
+```
+
+Click a section to jump to it; whichever section you are in is highlighted. The data section is the
+long one, so there is also a **Jump to dataset…** picker that lands directly on one `.mat`'s group
+(hidden when there is only one dataset).
+
 ### 4. Mark what you have judged
 
 Each model name carries one picker; whichever mark you choose is the one it shows:

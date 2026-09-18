@@ -813,7 +813,10 @@
   }
 
   function dataGroup(c, inp, models) {
-    var box = el("div", { class: "data-group" + (inp ? "" : " unassigned") });
+    var box = el("div", {
+      class: "data-group" + (inp ? "" : " unassigned"),
+      id: "g-" + (inp ? inp.id : "unassigned")      // target of the nav's dataset jump
+    });
     var tint = tintOfInput(c, inp);
     if (tint) {
       box.style.setProperty("--g-edge", tint.edge);
@@ -2029,6 +2032,141 @@
 
   var renderSeq = 0;
 
+  /* ---- Sticky section nav: the page gets long, so jump instead of scrolling ---- */
+  var NAV_SECTIONS = [
+    { id: "secStorage", labelKey: "sec.storage", always: true },
+    { id: "secCase",    labelKey: "sec.case",    always: true },
+    { id: "secData",    labelKey: "nav.data" },
+    { id: "secCompare", labelKey: "nav.compare" }
+  ];
+
+  /* Scroll an element into view. The room for the sticky bar comes from the CSS
+     scroll-margin-top, not from a target offset computed here.
+
+     The trap: images size themselves as they load, and a smooth scroll (scrollTo
+     or scrollIntoView alike) locks onto the coordinate computed when it started.
+     Measured on a first click of "Comparison": the page grew from 6573 to 7188
+     and the target moved down 343px, so the scroll stopped well short.
+     So once both the page height and the scroll position have settled, correct
+     the position once, instantly. If the user scrolls or types in the meantime,
+     drop the correction rather than fight them for the scrollbar. */
+  var scrollFix = null;
+
+  function scrollToEl(node) {
+    if (!node) return;
+    cancelScrollFix();
+    node.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    var st = { node: node, h: -1, y: -1, stable: 0, left: 24, timer: null };
+    st.give = function () { if (scrollFix === st) cancelScrollFix(); };
+    scrollFix = st;
+    ["wheel", "touchstart", "keydown"].forEach(function (ev) {
+      window.addEventListener(ev, st.give, { passive: true });
+    });
+    tickScrollFix(st);
+  }
+
+  function cancelScrollFix() {
+    var st = scrollFix;
+    if (!st) return;
+    scrollFix = null;
+    if (st.timer) clearTimeout(st.timer);
+    ["wheel", "touchstart", "keydown"].forEach(function (ev) {
+      window.removeEventListener(ev, st.give);
+    });
+  }
+
+  function tickScrollFix(st) {
+    if (scrollFix !== st) return;
+    // Both the page height and the scroll position have to stop moving. Waiting on
+    // the height alone fires the correction mid-animation, and the two scrolls
+    // fight each other to a position that is right for neither.
+    var h = document.documentElement.scrollHeight;
+    var y = Math.round(window.pageYOffset);
+    if (h === st.h && y === st.y) st.stable++;
+    else { st.h = h; st.y = y; st.stable = 0; }
+    if (st.stable >= 2) {
+      var want = parseFloat(getComputedStyle(st.node).scrollMarginTop) || 0;
+      if (Math.abs(st.node.getBoundingClientRect().top - want) > 4) {
+        st.node.scrollIntoView({ block: "start" });   // instant, no second animation
+      }
+      cancelScrollFix();
+      markNavActive();
+      return;
+    }
+    if (--st.left <= 0) { cancelScrollFix(); return; }
+    st.timer = setTimeout(function () { tickScrollFix(st); }, 150);
+  }
+
+  function renderNav() {
+    var wrap = $("navBar");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    var c = activeCase();
+
+    NAV_SECTIONS.forEach(function (sec) {
+      // Without a case the data and comparison sections are hidden; nothing to jump to
+      var enabled = sec.always || !!c;
+      wrap.appendChild(el("button", {
+        class: "nav-item" + (enabled ? "" : " off"),
+        "data-nav": sec.id,
+        text: t(sec.labelKey),
+        disabled: !enabled,
+        onclick: function () { scrollToEl($(sec.id)); }
+      }));
+    });
+
+    // The data section is the long one, so also offer a jump straight to one
+    // dataset. A select stays narrow however long the names get.
+    var groups = c ? c.inputs.slice() : [];
+    var loose = c ? c.models.filter(function (m) { return !inputOf(c, m); }) : [];
+    if (groups.length + (loose.length ? 1 : 0) > 1) {
+      var sel = el("select", { class: "nav-jump", title: t("nav.jumpTitle") });
+      sel.appendChild(el("option", { value: "", text: t("nav.jump") }));
+      groups.forEach(function (i) {
+        sel.appendChild(el("option", { value: "g-" + i.id, text: inputShort(i) }));
+      });
+      if (loose.length) {
+        sel.appendChild(el("option", { value: "g-unassigned", text: t("group.unassigned") }));
+      }
+      sel.addEventListener("change", function () {
+        if (sel.value) scrollToEl($(sel.value));
+        sel.value = "";              // reset so the same entry can be picked again
+      });
+      wrap.appendChild(sel);
+    }
+
+    wrap.appendChild(el("button", {
+      class: "nav-item nav-top", text: t("nav.top"),
+      onclick: function () { window.scrollTo({ top: 0, behavior: "smooth" }); }
+    }));
+    markNavActive();
+  }
+
+  /** Highlight whichever section is currently under the bar */
+  function markNavActive() {
+    var bar = $("navBar");
+    if (!bar) return;
+    var line = (bar.getBoundingClientRect().height || 0) + 24;
+    var active = null;
+    NAV_SECTIONS.forEach(function (sec) {
+      var node = $(sec.id);
+      if (!node || node.offsetParent === null) return;
+      if (node.getBoundingClientRect().top <= line) active = sec.id;
+    });
+    Array.prototype.forEach.call(bar.querySelectorAll("[data-nav]"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-nav") === active);
+    });
+  }
+
+  // Coalesce scroll events through rAF instead of recomputing on every one
+  var navTick = false;
+  window.addEventListener("scroll", function () {
+    if (navTick) return;
+    navTick = true;
+    requestAnimationFrame(function () { navTick = false; markNavActive(); });
+  }, { passive: true });
+
   function render() {
     // In folder mode ensureUrls really does read dozens or hundreds of files off disk,
     // and when that is slow the user has long since clicked another case. Without this
@@ -2041,6 +2179,7 @@
     var c = activeCase();
     $("caseBody").hidden = !c;
     $("emptyState").hidden = !!c;
+    renderNav();
     if (!c) return;
     ensureUrls(c).then(function () {
       if (seq !== renderSeq) return;

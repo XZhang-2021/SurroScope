@@ -23,10 +23,12 @@
     </div>
   </header>
 
+  <nav id="navBar" class="navbar" aria-label="section navigation"></nav>
+
   <div id="banner" class="banner" hidden></div>
 
   <!-- ============ Storage location ============ -->
-  <section class="card storage-card">
+  <section class="card storage-card" id="secStorage">
     <div class="card-head">
       <h2 data-i18n="sec.storage">存储位置</h2>
       <span class="hint" id="storageHint"></span>
@@ -35,7 +37,7 @@
   </section>
 
   <!-- ============ Case picker ============ -->
-  <section class="card">
+  <section class="card" id="secCase">
     <div class="card-head">
       <h2 data-i18n="sec.case">工况 Case</h2>
       <div class="card-head-actions">
@@ -49,7 +51,7 @@
   <div id="caseBody" hidden>
 
     <!-- ============ Input data -> models (two-level tree) ============ -->
-    <section class="card">
+    <section class="card" id="secData">
       <div class="card-head">
         <h2 data-i18n="sec.data">输入数据 / 模型结果</h2>
         <span class="hint" data-i18n="hint.data">模型会按文件名里的参数自动挂到对应的输入数据下面</span>
@@ -83,7 +85,7 @@
     </section>
 
     <!-- ============ Comparison ============ -->
-    <section class="card">
+    <section class="card" id="secCompare">
       <div class="card-head">
         <h2 data-i18n="sec.compare">对比视图</h2>
         <div class="card-head-actions">
